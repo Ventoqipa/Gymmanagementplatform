@@ -1,10 +1,7 @@
 # Dependencies
 node_modules
 
-# Build
-dist
-dist-ssr
-*.local
+
 
 # Env
 .env
