@@ -69,20 +69,20 @@ export default function Members() {
     setCurrentPage(1);
   };
   return (
-    <div className="h-full bg-[#131313] p-8">
-      <div className="mb-8">
-        <p className="text-[#e31e24] text-[10px] font-bold tracking-[3px] uppercase mb-2">
+    <div className="h-full bg-[#131313] p-4 md:p-8">
+      <div className="mb-6 md:mb-8">
+        <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] md:tracking-[3px] uppercase mb-2">
           Member_Database_System
         </p>
-        <h1 className="text-[#e5e2e1] text-[48px] font-black tracking-[-2px] uppercase">
+        <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
           Members
         </h1>
       </div>
 
       {/* Members List */}
-      <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-6">
+      <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 md:p-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
           <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
             Members_Directory
           </p>
@@ -98,9 +98,9 @@ export default function Members() {
         </div>
 
         {/* Search and Filters */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           {/* Search Bar */}
-          <div className="col-span-1">
+          <div className="md:col-span-1">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#808080]" size={16} />
               <input
@@ -147,9 +147,9 @@ export default function Members() {
         </div>
 
         {/* Members Table */}
-        <div className="space-y-1">
+        <div className="space-y-1 overflow-x-auto">
           {/* Table Header */}
-          <div className="grid grid-cols-12 gap-4 pb-3 border-b border-[rgba(93,63,60,0.2)]">
+          <div className="hidden lg:grid grid-cols-12 gap-4 pb-3 border-b border-[rgba(93,63,60,0.2)] min-w-[900px]">
             <div className="col-span-1">
               <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">ID</span>
             </div>
@@ -181,10 +181,10 @@ export default function Members() {
           ) : (
             currentMembers.map((member) => (
               <div key={member.id}>
-                {/* Member Row */}
+                {/* Member Row - Desktop */}
                 <div
                   onClick={() => setExpandedMember(expandedMember === member.id ? null : member.id)}
-                  className="grid grid-cols-12 gap-4 py-3 border-b border-[rgba(93,63,60,0.05)] hover:bg-[#131313] transition-colors cursor-pointer"
+                  className="hidden lg:grid grid-cols-12 gap-4 py-3 border-b border-[rgba(93,63,60,0.05)] hover:bg-[#131313] transition-colors cursor-pointer min-w-[900px]"
                 >
                   <div className="col-span-1 flex items-center gap-2">
                     {expandedMember === member.id ? (
@@ -235,10 +235,42 @@ export default function Members() {
                   </div>
                 </div>
 
+                {/* Member Row - Mobile */}
+                <div
+                  onClick={() => setExpandedMember(expandedMember === member.id ? null : member.id)}
+                  className="lg:hidden p-4 border-b border-[rgba(93,63,60,0.05)] bg-[#131313] hover:bg-[#1a1a1a] transition-colors cursor-pointer"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        {expandedMember === member.id ? (
+                          <ChevronUp size={14} className="text-[#e31e24]" />
+                        ) : (
+                          <ChevronDown size={14} className="text-[#808080]" />
+                        )}
+                        <span className="text-[#808080] text-[10px] font-mono">{member.id}</span>
+                      </div>
+                      <span className="text-[#e5e2e1] text-[14px] font-bold block">{member.name}</span>
+                      <span className="text-[#808080] text-[9px] block">{member.email}</span>
+                    </div>
+                    <span className={`text-[10px] font-bold ${
+                      member.status === "ACTIVE" ? "text-[#00ff00]" :
+                      member.status === "EXPIRED" ? "text-[#e31e24]" :
+                      "text-[#ffa500]"
+                    }`}>
+                      {member.status}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] mt-2">
+                    <span className="text-[#e31e24] font-bold tracking-[1px] uppercase">{member.tier}</span>
+                    <span className="text-[#808080]">{member.monthlyVisits} visits</span>
+                  </div>
+                </div>
+
                 {/* Expanded Details */}
                 {expandedMember === member.id && (
-                  <div className="bg-[#131313] border-b border-[rgba(93,63,60,0.05)] p-6">
-                    <div className="grid grid-cols-3 gap-6">
+                  <div className="bg-[#131313] border-b border-[rgba(93,63,60,0.05)] p-4 md:p-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
                       {/* Tier Recognition */}
                       <div className="bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-6">
                         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] mb-2">
@@ -322,11 +354,11 @@ export default function Members() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between mt-6 pt-6 border-t border-[rgba(93,63,60,0.1)]">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-6 border-t border-[rgba(93,63,60,0.1)]">
             <div className="text-[#808080] text-[10px]">
               Page {currentPage} of {totalPages}
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap justify-center">
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
                 disabled={currentPage === 1}

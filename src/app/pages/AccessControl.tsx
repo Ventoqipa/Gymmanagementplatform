@@ -1,16 +1,16 @@
 export default function AccessControl() {
   return (
-    <div className="h-full bg-[#131313] p-8">
-      <div className="mb-8">
-        <p className="text-[#e31e24] text-[10px] font-bold tracking-[3px] uppercase mb-2">
+    <div className="h-full bg-[#131313] p-4 md:p-8">
+      <div className="mb-6 md:mb-8">
+        <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] md:tracking-[3px] uppercase mb-2">
           Biometric_Security_System
         </p>
-        <h1 className="text-[#e5e2e1] text-[48px] font-black tracking-[-2px] uppercase">
+        <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
           Access Control
         </h1>
       </div>
 
-      <div className="grid grid-cols-3 gap-6 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 mb-6">
         {/* Terminal Status Card */}
         <div className="bg-[#2a2a2a] border border-[rgba(93,63,60,0.1)] p-6">
           <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">

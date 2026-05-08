@@ -127,20 +127,20 @@ export default function POS() {
 
   return (
     <div className="h-full bg-[#131313] overflow-auto">
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         {/* Header */}
         <div className="mb-6">
-          <p className="text-[#e31e24] text-[10px] font-bold tracking-[3px] uppercase mb-2">
+          <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] md:tracking-[3px] uppercase mb-2">
             Point_of_Sale_System
           </p>
-          <h1 className="text-[#e5e2e1] text-[48px] font-black tracking-[-2px] uppercase">
+          <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
             POS Terminal
           </h1>
         </div>
 
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Product Catalog */}
-          <div className="col-span-2 space-y-4">
+          <div className="lg:col-span-2 space-y-4">
             {/* Search Bar & Add Product Button */}
             <div className="flex gap-3">
               <div className="flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4">
@@ -184,7 +184,7 @@ export default function POS() {
             </div>
 
             {/* Product Grid */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {filteredProducts.map((product) => (
                 <div
                   key={product.id}
@@ -356,8 +356,8 @@ export default function POS() {
 
       {/* Add Product Modal */}
       {showAddProductModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-[#131313] border border-[rgba(93,63,60,0.2)] p-8 max-w-md w-full mx-4">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#131313] border border-[rgba(93,63,60,0.2)] p-6 md:p-8 max-w-md w-full">
             <div className="flex justify-between items-start mb-6">
               <div>
                 <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">

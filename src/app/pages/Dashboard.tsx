@@ -2,19 +2,19 @@ import { Activity, Users, DollarSign, TrendingUp } from "lucide-react";
 
 export default function Dashboard() {
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8">
       {/* Header */}
       <div>
-        <p className="text-[#e31e24] text-[10px] font-bold tracking-[3px] uppercase mb-2">
+        <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] md:tracking-[3px] uppercase mb-2">
           Operational_Overview
         </p>
-        <h1 className="text-[#e5e2e1] text-[48px] font-black tracking-[-2px] uppercase">
+        <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
           Dashboard
         </h1>
       </div>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         {/* Current Capacity */}
         <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
           <div className="flex items-start justify-between mb-4">

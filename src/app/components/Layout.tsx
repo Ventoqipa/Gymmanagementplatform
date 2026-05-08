@@ -5,7 +5,9 @@ import {
   Users,
   ShoppingCart,
   BarChart3,
-  LogOut
+  LogOut,
+  Menu,
+  X
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -13,6 +15,7 @@ import logoImg from "../../imports/image-2.png";
 
 export default function Layout() {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { logout } = useAuth();
   const navigate = useNavigate();
 
@@ -23,8 +26,18 @@ export default function Layout() {
   };
   return (
     <div className="flex h-screen bg-[#0e0e0e] text-white font-['Space_Grotesk',sans-serif]">
+      {/* Mobile Menu Button */}
+      <button
+        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        className="lg:hidden fixed top-4 left-4 z-50 bg-[#e31e24] p-2 rounded"
+      >
+        {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+      </button>
+
       {/* Sidebar Navigation */}
-      <aside className="w-64 bg-[#131313] border-r border-[rgba(93,63,60,0.1)] flex flex-col">
+      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-[#131313] border-r border-[rgba(93,63,60,0.1)] flex flex-col transform transition-transform duration-300 ${
+        mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+      }`}>
         {/* Logo Section */}
         <div className="p-6 border-b border-[rgba(93,63,60,0.1)]">
           <div className="flex items-center gap-3">
@@ -45,6 +58,7 @@ export default function Layout() {
           <NavLink
             to="/"
             end
+            onClick={() => setMobileMenuOpen(false)}
             className={({ isActive }) =>
               `flex items-center gap-3 px-4 py-3 rounded transition-colors ${
                 isActive
@@ -59,6 +73,7 @@ export default function Layout() {
 
           <NavLink
             to="/access-control"
+            onClick={() => setMobileMenuOpen(false)}
             className={({ isActive }) =>
               `flex items-center gap-3 px-4 py-3 rounded transition-colors ${
                 isActive
@@ -73,6 +88,7 @@ export default function Layout() {
 
           <NavLink
             to="/members"
+            onClick={() => setMobileMenuOpen(false)}
             className={({ isActive }) =>
               `flex items-center gap-3 px-4 py-3 rounded transition-colors ${
                 isActive
@@ -87,6 +103,7 @@ export default function Layout() {
 
           <NavLink
             to="/pos"
+            onClick={() => setMobileMenuOpen(false)}
             className={({ isActive }) =>
               `flex items-center gap-3 px-4 py-3 rounded transition-colors ${
                 isActive
@@ -101,6 +118,7 @@ export default function Layout() {
 
           <NavLink
             to="/reports"
+            onClick={() => setMobileMenuOpen(false)}
             className={({ isActive }) =>
               `flex items-center gap-3 px-4 py-3 rounded transition-colors ${
                 isActive
@@ -140,8 +158,8 @@ export default function Layout() {
 
       {/* Logout Confirmation Modal */}
       {showLogoutModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-[#131313] border border-[rgba(93,63,60,0.2)] p-8 max-w-md w-full mx-4">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#131313] border border-[rgba(93,63,60,0.2)] p-6 md:p-8 max-w-md w-full">
             <div className="mb-6">
               <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">
                 Confirmación
@@ -172,8 +190,16 @@ export default function Layout() {
         </div>
       )}
 
+      {/* Mobile Overlay */}
+      {mobileMenuOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black/50 z-30"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
       {/* Main Content Area */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto lg:ml-0">
         <Outlet />
       </main>
     </div>

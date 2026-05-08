@@ -1,12 +1,12 @@
 export default function Reports() {
   return (
-    <div className="h-full bg-[#131313] p-8">
-      <div className="flex items-end justify-between mb-8">
+    <div className="h-full bg-[#131313] p-4 md:p-8">
+      <div className="flex flex-col md:flex-row items-start md:items-end justify-between gap-4 mb-6 md:mb-8">
         <div>
-          <p className="text-[#e31e24] text-[12px] font-bold tracking-[3.6px] uppercase mb-2">
+          <p className="text-[#e31e24] text-[10px] md:text-[12px] font-bold tracking-[2px] md:tracking-[3.6px] uppercase mb-2">
             Analytics_Core_V2.0
           </p>
-          <h1 className="text-[#e5e2e1] text-[72px] font-black tracking-[-3.6px] uppercase leading-[72px]">
+          <h1 className="text-[#e5e2e1] text-[36px] md:text-[72px] font-black tracking-[-2px] md:tracking-[-3.6px] uppercase leading-tight md:leading-[72px]">
             Reports
           </h1>
         </div>
@@ -44,7 +44,7 @@ export default function Reports() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Member Growth */}
         <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-6">
           <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">

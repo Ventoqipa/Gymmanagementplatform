@@ -17,25 +17,25 @@ export default function Login() {
   };
 
   return (
-    <div className="h-screen bg-[#0e0e0e] flex items-center justify-center">
+    <div className="h-screen bg-[#0e0e0e] flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         {/* Logo Section */}
-        <div className="flex flex-col items-center mb-12">
+        <div className="flex flex-col items-center mb-8 md:mb-12">
           <img
             src={logoImg}
             alt="Elite Gym Logo"
-            className="w-40 h-40 mb-6"
+            className="w-24 h-24 md:w-40 md:h-40 mb-4 md:mb-6"
           />
-          <h1 className="text-[#e5e2e1] text-[36px] font-black tracking-[-1.5px] uppercase font-['Space_Grotesk',sans-serif]">
+          <h1 className="text-[#e5e2e1] text-[24px] md:text-[36px] font-black tracking-[-1.5px] uppercase font-['Space_Grotesk',sans-serif] text-center">
             Elite Gym 24/7
           </h1>
-          <p className="text-[#e31e24] text-[12px] font-bold tracking-[3px] uppercase mt-2">
+          <p className="text-[#e31e24] text-[10px] md:text-[12px] font-bold tracking-[2px] md:tracking-[3px] uppercase mt-2">
             Management System
           </p>
         </div>
 
         {/* Login Form */}
-        <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-8">
+        <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 md:p-8">
           <div className="mb-6">
             <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">
               System_Access
