@@ -1,34 +1,62 @@
+import { useMemo } from "react";
 import { Activity, Users, DollarSign, TrendingUp } from "lucide-react";
+import {
+  getActiveMembersCountFromStore,
+  getDailyCheckIns,
+  getPeakHoursSlots,
+  getRecentActivity,
+  getRevenueToday,
+} from "../lib/platformStats";
+
+function formatMoney(n: number): string {
+  return n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+}
 
 export default function Dashboard() {
+  const activeMembers = useMemo(() => getActiveMembersCountFromStore(), []);
+  const checkIns = useMemo(() => getDailyCheckIns(), []);
+  const revenue = useMemo(() => getRevenueToday(), []);
+  const peakSlots = useMemo(() => getPeakHoursSlots(), []);
+  const activity = useMemo(() => getRecentActivity(), []);
+
+  const capacityPct =
+    activeMembers > 0
+      ? Math.min(100, Math.round((checkIns / activeMembers) * 100))
+      : 0;
+
   return (
     <div className="p-4 md:p-8 space-y-6 md:space-y-8">
-      {/* Header */}
       <div>
-        <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] md:tracking-[3px] uppercase mb-2">
-          Operational_Overview
-        </p>
         <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
           Dashboard
         </h1>
+        <p className="text-[#808080] text-[11px] mt-2">
+          Métricas calculadas desde los datos guardados en este navegador.
+        </p>
       </div>
 
-      {/* Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        {/* Current Capacity */}
         <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
           <div className="flex items-start justify-between mb-4">
             <Activity className="text-[#e31e24]" size={24} />
-            <span className="text-[10px] text-[#00ff00] font-bold tracking-[1px]">LIVE</span>
+            {checkIns > 0 && (
+              <span className="text-[10px] text-[#00ff00] font-bold tracking-[1px]">LIVE</span>
+            )}
           </div>
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
             Current Capacity
           </p>
-          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">47%</p>
-          <p className="text-[#808080] text-[10px] mt-2">89/190 members in facility</p>
+          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">{capacityPct}%</p>
+          <p className="text-[#808080] text-[10px] mt-2">
+            {checkIns}/{activeMembers || "—"} accesos hoy vs socios activos
+          </p>
         </div>
 
-        {/* Daily Check-ins */}
         <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
           <div className="flex items-start justify-between mb-4">
             <Users className="text-[#e31e24]" size={24} />
@@ -36,11 +64,10 @@ export default function Dashboard() {
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
             Daily Check-ins
           </p>
-          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">342</p>
-          <p className="text-[#00ff00] text-[10px] mt-2">+12% vs yesterday</p>
+          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">{checkIns}</p>
+          <p className="text-[#808080] text-[10px] mt-2">Accesos otorgados hoy</p>
         </div>
 
-        {/* Revenue Today */}
         <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
           <div className="flex items-start justify-between mb-4">
             <DollarSign className="text-[#e31e24]" size={24} />
@@ -48,11 +75,14 @@ export default function Dashboard() {
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
             Revenue Today
           </p>
-          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">$4,823</p>
-          <p className="text-[#808080] text-[10px] mt-2">47 transactions</p>
+          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">
+            {formatMoney(revenue.total)}
+          </p>
+          <p className="text-[#808080] text-[10px] mt-2">
+            {revenue.transactions} transacciones
+          </p>
         </div>
 
-        {/* Active Members */}
         <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
           <div className="flex items-start justify-between mb-4">
             <TrendingUp className="text-[#e31e24]" size={24} />
@@ -60,23 +90,19 @@ export default function Dashboard() {
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
             Active Members
           </p>
-          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">1,247</p>
-          <p className="text-[#00ff00] text-[10px] mt-2">+23 this month</p>
+          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">
+            {activeMembers.toLocaleString("en-US")}
+          </p>
+          <p className="text-[#808080] text-[10px] mt-2">Membresía vigente hoy</p>
         </div>
       </div>
 
-      {/* Peak Hours Chart */}
       <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
           Peak_Hours_Analysis
         </p>
         <div className="space-y-3">
-          {[
-            { time: "05:00-07:00", value: 65, label: "Morning Peak" },
-            { time: "12:00-14:00", value: 45, label: "Lunch Rush" },
-            { time: "17:00-20:00", value: 95, label: "Evening Peak" },
-            { time: "20:00-22:00", value: 70, label: "Night Shift" },
-          ].map((slot) => (
+          {peakSlots.map((slot) => (
             <div key={slot.time}>
               <div className="flex justify-between mb-1">
                 <span className="text-[#e5e2e1] text-[12px] font-bold">{slot.time}</span>
@@ -93,35 +119,35 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Recent Activity */}
       <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
           Recent_Activity_Log
         </p>
-        <div className="space-y-3">
-          {[
-            { action: "MEMBER_CHECKIN", name: "Marcus Chen", time: "2 min ago", tier: "ELITE_BLK" },
-            { action: "POS_SALE", name: "Sarah Williams", time: "5 min ago", tier: "GOLD" },
-            { action: "NEW_ENROLLMENT", name: "David Kim", time: "12 min ago", tier: "PLATINUM_ELITE" },
-            { action: "MEMBER_CHECKIN", name: "Jessica Torres", time: "15 min ago", tier: "ELITE_BLK" },
-          ].map((activity, i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between py-2 border-b border-[rgba(93,63,60,0.05)]"
-            >
-              <div className="flex items-center gap-4">
-                <span className="text-[#e31e24] text-[9px] font-bold tracking-[1px] uppercase">
-                  {activity.action}
-                </span>
-                <span className="text-[#e5e2e1] text-[12px] font-bold">{activity.name}</span>
-                <span className="text-[#808080] text-[10px] tracking-[1px] uppercase">
-                  {activity.tier}
-                </span>
+        {activity.length === 0 ? (
+          <p className="text-[#808080] text-[12px]">
+            Sin actividad registrada. Los accesos, pagos y ventas POS aparecerán aquí.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {activity.map((row, i) => (
+              <div
+                key={`${row.action}-${row.sortKey}-${i}`}
+                className="flex items-center justify-between py-2 border-b border-[rgba(93,63,60,0.05)]"
+              >
+                <div className="flex items-center gap-4 flex-wrap">
+                  <span className="text-[#e31e24] text-[9px] font-bold tracking-[1px] uppercase">
+                    {row.action}
+                  </span>
+                  <span className="text-[#e5e2e1] text-[12px] font-bold">{row.name}</span>
+                  <span className="text-[#808080] text-[10px] tracking-[1px] uppercase">
+                    {row.tier}
+                  </span>
+                </div>
+                <span className="text-[#808080] text-[10px]">{row.time}</span>
               </div>
-              <span className="text-[#808080] text-[10px]">{activity.time}</span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

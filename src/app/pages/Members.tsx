@@ -21,29 +21,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { addMembershipPayment, getPaymentsForMember } from "../lib/demoStore";
+import {
+  loadMembers,
+  saveMembers,
+  type Member,
+} from "../lib/membersStore";
 import { mockFaceIdEnroll } from "../lib/thirdPartyMocks";
-
-interface Member {
-  id: string;
-  firstName: string;
-  lastName: string;
-  tier: string;
-  enrollmentDate: string;
-  renewalDate: string;
-  monthlyVisits: number;
-  avgSessionTime: number;
-  /** Correo opcional (canal secundario). */
-  email?: string;
-  /** Teléfono / WhatsApp — canal principal de comunicación del gym. */
-  phone: string;
-  /** Domicilio para expediente / contrato */
-  address?: string;
-  /** Vista previa en demo (data URL); en producción subir a almacenamiento seguro. */
-  idDocumentDataUrl?: string;
-  /** false = sin plantilla FaceID; true/undefined = puede acceder por rostro (undefined = socios previos al campo) */
-  faceIdEnrolled?: boolean;
-  faceIdTemplateId?: string;
-}
 
 type ExpiryUrgency = "expired" | "critical" | "warning" | "notice" | "ok";
 
@@ -183,27 +166,6 @@ function MemberExpiryIndicator({
   );
 }
 
-const INITIAL_MEMBERS: Member[] = [
-  { id: "MEM-1247", firstName: "Marcus", lastName: "Chen", tier: "ELITE_BLK", enrollmentDate: "2025-11-15", renewalDate: "2026-05-15", monthlyVisits: 23, avgSessionTime: 87, email: "marcus.chen@email.com", phone: "+52 55 1000 1247" },
-  { id: "MEM-1246", firstName: "Sarah", lastName: "Williams", tier: "GOLD", enrollmentDate: "2025-08-20", renewalDate: "2026-05-17", monthlyVisits: 18, avgSessionTime: 65, email: "sarah.w@email.com", phone: "+52 55 1000 1246" },
-  { id: "MEM-1245", firstName: "David", lastName: "Kim", tier: "PLATINUM_ELITE", enrollmentDate: "2025-06-25", renewalDate: "2026-05-20", monthlyVisits: 20, avgSessionTime: 92, email: "david.kim@email.com", phone: "+52 55 1000 1245" },
-  { id: "MEM-1244", firstName: "Jessica", lastName: "Torres", tier: "ELITE_BLK", enrollmentDate: "2025-11-22", renewalDate: "2026-05-22", monthlyVisits: 25, avgSessionTime: 105, email: "j.torres@email.com", phone: "+52 55 1000 1244" },
-  { id: "MEM-1243", firstName: "Michael", lastName: "Johnson", tier: "GOLD", enrollmentDate: "2025-09-08", renewalDate: "2026-05-28", monthlyVisits: 12, avgSessionTime: 55, email: "mjohnson@email.com", phone: "+52 55 1000 1243" },
-  { id: "MEM-1242", firstName: "Emily", lastName: "Rodriguez", tier: "PLATINUM_ELITE", enrollmentDate: "2025-12-10", renewalDate: "2026-06-08", monthlyVisits: 22, avgSessionTime: 78, email: "emily.r@email.com", phone: "+52 55 1000 1242" },
-  { id: "MEM-1241", firstName: "James", lastName: "Anderson", tier: "BASIC", enrollmentDate: "2025-10-05", renewalDate: "2026-06-24", monthlyVisits: 15, avgSessionTime: 60, email: "james.a@email.com", phone: "+52 55 1000 1241" },
-  { id: "MEM-1240", firstName: "Lisa", lastName: "Martinez", tier: "ELITE_BLK", enrollmentDate: "2025-11-01", renewalDate: "2026-07-12", monthlyVisits: 28, avgSessionTime: 95, email: "lisa.m@email.com", phone: "+52 55 1000 1240" },
-  { id: "MEM-1239", firstName: "Robert", lastName: "Taylor", tier: "GOLD", enrollmentDate: "2025-08-12", renewalDate: "2026-08-01", monthlyVisits: 10, avgSessionTime: 45, email: "robert.t@email.com", phone: "+52 55 1000 1239" },
-  { id: "MEM-1238", firstName: "Amanda", lastName: "White", tier: "PLATINUM_ELITE", enrollmentDate: "2025-12-18", renewalDate: "2026-09-20", monthlyVisits: 19, avgSessionTime: 82, email: "amanda.w@email.com", phone: "+52 55 1000 1238" },
-  { id: "MEM-1237", firstName: "Christopher", lastName: "Lee", tier: "BASIC", enrollmentDate: "2025-10-28", renewalDate: "2026-10-28", monthlyVisits: 14, avgSessionTime: 58, email: "chris.lee@email.com", phone: "+52 55 1000 1237" },
-  { id: "MEM-1236", firstName: "Nicole", lastName: "Brown", tier: "ELITE_BLK", enrollmentDate: "2025-11-28", renewalDate: "2026-11-25", monthlyVisits: 26, avgSessionTime: 98, email: "nicole.b@email.com", phone: "+52 55 1000 1236" },
-  { id: "MEM-1235", firstName: "Daniel", lastName: "Garcia", tier: "GOLD", enrollmentDate: "2026-01-08", renewalDate: "2026-12-10", monthlyVisits: 8, avgSessionTime: 40, email: "daniel.g@email.com", phone: "+52 55 1000 1235" },
-  { id: "MEM-1234", firstName: "Rachel", lastName: "Miller", tier: "PLATINUM_ELITE", enrollmentDate: "2026-02-14", renewalDate: "2027-01-30", monthlyVisits: 21, avgSessionTime: 85, email: "rachel.m@email.com", phone: "+52 55 1000 1234" },
-  { id: "MEM-1233", firstName: "Kevin", lastName: "Wilson", tier: "BASIC", enrollmentDate: "2025-05-18", renewalDate: "2026-04-10", monthlyVisits: 16, avgSessionTime: 62, email: "kevin.w@email.com", phone: "+52 55 1000 1233" },
-  { id: "MEM-1232", firstName: "Samantha", lastName: "Davis", tier: "ELITE_BLK", enrollmentDate: "2025-09-03", renewalDate: "2026-03-22", monthlyVisits: 27, avgSessionTime: 102, email: "samantha.d@email.com", phone: "+52 55 1000 1232" },
-  { id: "MEM-1231", firstName: "Brian", lastName: "Moore", tier: "GOLD", enrollmentDate: "2025-07-14", renewalDate: "2026-05-02", monthlyVisits: 17, avgSessionTime: 68, email: "brian.m@email.com", phone: "+52 55 1000 1231" },
-  { id: "MEM-1230", firstName: "Ashley", lastName: "Jackson", tier: "PLATINUM_ELITE", enrollmentDate: "2026-04-20", renewalDate: "2027-04-20", monthlyVisits: 11, avgSessionTime: 50, email: "ashley.j@email.com", phone: "+52 55 1000 1230" },
-];
-
 const ITEMS_PER_PAGE = 8;
 
 function nextMemberId(list: Member[]): string {
@@ -263,7 +225,7 @@ const emptyNewMemberForm = () => {
 
 export default function Members() {
   const navigate = useNavigate();
-  const [members, setMembers] = useState<Member[]>(INITIAL_MEMBERS);
+  const [members, setMembers] = useState<Member[]>(() => loadMembers());
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [newMemberForm, setNewMemberForm] = useState(emptyNewMemberForm);
   const [searchTerm, setSearchTerm] = useState("");
@@ -277,6 +239,10 @@ export default function Members() {
     method: "CARD" as "CASH" | "CARD" | "QR",
   });
   const [paymentsTick, setPaymentsTick] = useState(0);
+
+  useEffect(() => {
+    saveMembers(members);
+  }, [members]);
   const [savingNewMember, setSavingNewMember] = useState(false);
   const [phonePrefixMenuOpen, setPhonePrefixMenuOpen] = useState(false);
   const phonePrefixRef = useRef<HTMLDivElement>(null);
@@ -606,9 +572,6 @@ export default function Members() {
   return (
     <div className="h-full bg-[#131313] p-4 md:p-8">
       <div className="mb-6 md:mb-8">
-        <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] md:tracking-[3px] uppercase mb-2">
-          Member_Database_System
-        </p>
         <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
           Members
         </h1>

@@ -3,11 +3,12 @@ import {
   getAccessLog,
   getMembershipIncomeTotal,
   getMembershipPayments,
-  getPosSalesToday,
 } from "../lib/demoStore";
-
-/** Alineado al listado en Members (demo). */
-const DEMO_ACTIVE_MEMBERS = 1247;
+import {
+  computeTopProducts,
+  getActiveMembersCountFromStore,
+  getPosSalesTodaySync,
+} from "../lib/platformStats";
 
 type TabId = "gym" | "pos";
 
@@ -27,7 +28,17 @@ export default function Reports() {
 
   const posToday = useMemo(() => {
     void tick;
-    return getPosSalesToday();
+    return getPosSalesTodaySync();
+  }, [tick]);
+
+  const activeMembers = useMemo(() => {
+    void tick;
+    return getActiveMembersCountFromStore();
+  }, [tick]);
+
+  const topProducts = useMemo(() => {
+    void tick;
+    return computeTopProducts();
   }, [tick]);
 
   const posTodayTotal = posToday.reduce((a, s) => a + s.total, 0);
@@ -42,26 +53,16 @@ export default function Reports() {
     return accessLog.filter((e) => new Date(e.timestampIso) >= start);
   }, [accessLog]);
 
-  const topProductsMock = [
-    { name: "ISO WHEY PROTEIN", sales: 12450, units: 342 },
-    { name: "PRE-WORKOUT RAGE", sales: 8920, units: 287 },
-    { name: "RECOVERY BCAA", sales: 6340, units: 198 },
-    { name: "ELITE GYM TANK TOP", sales: 4410, units: 156 },
-  ];
-
   return (
     <div className="h-full bg-[#131313] p-4 md:p-8 overflow-auto">
       <div className="flex flex-col md:flex-row items-start md:items-end justify-between gap-4 mb-6 md:mb-8">
         <div>
-          <p className="text-[#e31e24] text-[10px] md:text-[12px] font-bold tracking-[2px] md:tracking-[3.6px] uppercase mb-2">
-            Analytics_Core · Demo
-          </p>
           <h1 className="text-[#e5e2e1] text-[36px] md:text-[72px] font-black tracking-[-2px] md:tracking-[-3.6px] uppercase leading-tight md:leading-[72px]">
             Reports
           </h1>
           <p className="text-[#808080] text-[12px] mt-3 max-w-2xl">
-            Datos de membresías, accesos y ventas POS se leen del almacén demo en memoria; se actualizan al registrar pagos,
-            simular accesos o cerrar ventas en POS.
+            Membresías, accesos y ventas POS se leen de los datos guardados en este navegador; se actualizan al registrar
+            pagos, simular accesos o cerrar ventas en POS.
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -102,7 +103,7 @@ export default function Reports() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-6">
               <p className="text-[#393939] text-[11px] font-bold tracking-[1.2px] uppercase mb-2">
-                Ingresos por membresías (demo)
+                Ingresos por membresías
               </p>
               <p className="text-[#e5e2e1] text-[40px] font-black tracking-tight leading-none">
                 ${membershipTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -114,16 +115,16 @@ export default function Reports() {
                 Clientes activos
               </p>
               <p className="text-[#e5e2e1] text-[40px] font-black tracking-tight leading-none">
-                {DEMO_ACTIVE_MEMBERS.toLocaleString("en-US")}
+                {activeMembers.toLocaleString("en-US")}
               </p>
-              <p className="text-[#808080] text-[10px] mt-2">Referencia alineada al dashboard (MVP reportes básicos)</p>
+              <p className="text-[#808080] text-[10px] mt-2">Socios con membresía vigente hoy</p>
             </div>
             <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-6">
               <p className="text-[#393939] text-[11px] font-bold tracking-[1.2px] uppercase mb-2">
                 Accesos hoy
               </p>
               <p className="text-[#e5e2e1] text-[40px] font-black tracking-tight leading-none">{accessToday.length}</p>
-              <p className="text-[#808080] text-[10px] mt-2">Eventos con timestamp de hoy en el log demo</p>
+              <p className="text-[#808080] text-[10px] mt-2">Eventos con timestamp de hoy en el log local</p>
             </div>
           </div>
 
@@ -200,7 +201,7 @@ export default function Reports() {
             <p className="text-[#e5e2e1] text-[56px] md:text-[60px] font-black tracking-[-3px] leading-[56px] mb-2">
               ${posTodayTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
-            <p className="text-[#808080] text-[10px]">{posToday.length} transacciones · datos demo + ventas cerradas en la sesión</p>
+            <p className="text-[#808080] text-[10px]">{posToday.length} transacciones · ventas guardadas en este navegador</p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -235,23 +236,27 @@ export default function Reports() {
 
             <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-6">
               <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
-                Productos más vendidos (referencia demo)
+                Productos más vendidos
               </p>
               <div className="space-y-4">
-                {topProductsMock.map((product, i) => (
-                  <div key={product.name} className="border-b border-[rgba(93,63,60,0.05)] pb-3">
-                    <div className="flex justify-between mb-1">
-                      <span className="text-[#e5e2e1] text-[12px] font-bold">{product.name}</span>
-                      <span className="text-[#e31e24] text-[12px] font-bold">
-                        ${product.sales.toLocaleString("en-US")}
-                      </span>
+                {topProducts.length === 0 ? (
+                  <p className="text-[#808080] text-[13px]">Sin ventas registradas aún.</p>
+                ) : (
+                  topProducts.map((product, i) => (
+                    <div key={product.name} className="border-b border-[rgba(93,63,60,0.05)] pb-3">
+                      <div className="flex justify-between mb-1">
+                        <span className="text-[#e5e2e1] text-[12px] font-bold">{product.name}</span>
+                        <span className="text-[#e31e24] text-[12px] font-bold">
+                          ${product.sales.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[#808080] text-[10px]">{product.units} unidades</span>
+                        <span className="text-[#808080] text-[10px]">#{i + 1}</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#808080] text-[10px]">{product.units} unidades</span>
-                      <span className="text-[#808080] text-[10px]">#{i + 1}</span>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -261,8 +266,8 @@ export default function Reports() {
               Notas MVP
             </p>
             <p className="text-[#808080] text-[12px] leading-relaxed max-w-3xl">
-              Métodos de pago (efectivo, tarjeta, QR) y tickets se muestran en el flujo del POS. Este tab resume ventas del día;
-              el desglose “top” usa series de demostración hasta conectar un motor de reportes con base de datos.
+              Métodos de pago (efectivo, tarjeta, QR) y tickets se muestran en el flujo del POS. El ranking de productos se
+              calcula a partir del detalle de líneas guardado en cada venta local.
             </p>
           </div>
         </>

@@ -141,7 +141,7 @@ export default function Layout() {
             </div>
             <div className="flex items-center justify-between text-[10px]">
               <span className="text-[#808080] uppercase tracking-[1px]">Terminals</span>
-              <span className="text-[#e5e2e1] font-bold">3/3 ACTIVE</span>
+              <span className="text-[#e5e2e1] font-bold">1/3 ACTIVE</span>
             </div>
           </div>
 

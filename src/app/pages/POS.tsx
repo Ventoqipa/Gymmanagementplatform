@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router";
 import { Search, Plus, Minus, Trash2, CreditCard, Banknote, QrCode, X, Package, User, Pencil } from "lucide-react";
 import { toast } from "sonner";
-import { addPosSale } from "../lib/demoStore";
+import type { PosSale } from "../../features/pos/domain/types";
+import {
+  loadPosProducts,
+  loadPosSales,
+  savePosProducts,
+  savePosSales,
+} from "../../features/pos/infrastructure/localPosStorage";
 
 interface Product {
   id: string;
@@ -45,22 +51,11 @@ const IVA_REGIMEN_LABEL: Record<IvaRegimen, string> = {
   frontera: "IVA 8%",
 };
 
-const INITIAL_PRODUCTS: Product[] = [
-  { id: "SUP-001", name: "ISO WHEY PROTEIN 2LB", category: "SUPPLEMENTS", price: 45.99, stock: 23 },
-  { id: "SUP-002", name: "PRE-WORKOUT RAGE", category: "SUPPLEMENTS", price: 32.99, stock: 18 },
-  { id: "SUP-003", name: "RECOVERY BCAA", category: "SUPPLEMENTS", price: 28.50, stock: 31 },
-  { id: "SUP-004", name: "CREATINE MONOHYDRATE", category: "SUPPLEMENTS", price: 24.99, stock: 27 },
-  { id: "GEAR-001", name: "ELITE GYM TANK TOP", category: "GEAR", price: 19.99, stock: 45 },
-  { id: "GEAR-002", name: "LIFTING GLOVES PRO", category: "GEAR", price: 15.99, stock: 12 },
-  { id: "GEAR-003", name: "GYM TOWEL ELITE", category: "GEAR", price: 12.99, stock: 38 },
-  { id: "ACC-001", name: "SHAKER BOTTLE 24OZ", category: "ACCESSORIES", price: 8.99, stock: 56 },
-];
-
 export default function POS() {
   const location = useLocation();
   const linkedMember = (location.state as { memberId?: string; memberName?: string } | null) ?? null;
 
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>(() => loadPosProducts() as Product[]);
   const [searchTerm, setSearchTerm] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
@@ -71,9 +66,13 @@ export default function POS() {
   const [ivaRegimen, setIvaRegimen] = useState<IvaRegimen>("general");
 
   useEffect(() => {
+    savePosProducts(products);
+  }, [products]);
+
+  useEffect(() => {
     if (linkedMember?.memberName) {
       toast.info(`POS vinculado a ${linkedMember.memberName}`, {
-        description: "La vent retail queda asociada en el ticket de demo.",
+        description: "La venta queda asociada al socio en el ticket.",
       });
     }
   }, [linkedMember?.memberId, linkedMember?.memberName]);
@@ -276,22 +275,34 @@ export default function POS() {
       ivaLabelShort: IVA_REGIMEN_LABEL[ivaRegimen],
     };
 
-    setProducts((prev) =>
-      prev.map((p) => {
-        const line = cart.find((c) => c.id === p.id);
-        if (!line) return p;
-        return { ...p, stock: Math.max(0, p.stock - line.quantity) };
-      })
-    );
+    const updatedProducts = products.map((p) => {
+      const line = cart.find((c) => c.id === p.id);
+      if (!line) return p;
+      return { ...p, stock: Math.max(0, p.stock - line.quantity) };
+    });
+    setProducts(updatedProducts);
 
-    addPosSale({
+    const sale: PosSale = {
+      id: receipt.id.replace("TKT-", "POS-"),
       total: receipt.total,
+      subtotal: receipt.subtotal,
+      tax: receipt.tax,
       method: receipt.paymentMethod,
+      dateIso: receipt.createdIso,
       linesSummary: receipt.lines.map((l) => `${l.qty}× ${l.name}`).join(" · "),
       memberId: receipt.member?.id,
       memberName: receipt.member?.name,
-      id: receipt.id.replace("TKT-", "POS-"),
-    });
+      ivaRegimen: receipt.ivaRegimen,
+      ivaRate: receipt.ivaRate,
+      lines: cart.map((c) => ({
+        productId: c.id,
+        name: c.name,
+        quantity: c.quantity,
+        unitPrice: c.price,
+        lineTotal: c.price * c.quantity,
+      })),
+    };
+    savePosSales([sale, ...loadPosSales()]);
 
     setTicketReceipt(receipt);
     toast.success("Venta completada", {
@@ -305,9 +316,6 @@ export default function POS() {
       <div className="p-4 md:p-8">
         {/* Header */}
         <div className="mb-6">
-          <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] md:tracking-[3px] uppercase mb-2">
-            Point_of_Sale_System
-          </p>
           <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
             POS Terminal
           </h1>

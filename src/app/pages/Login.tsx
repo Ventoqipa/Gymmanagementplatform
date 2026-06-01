@@ -69,9 +69,7 @@ export default function Login() {
 
         <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 md:p-8">
           <div className="mb-6">
-            <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">
-              System_Access
-            </p>
+            
             <h2 className="text-[#e5e2e1] text-[24px] font-black tracking-[-1px] uppercase">
               Authentication
             </h2>

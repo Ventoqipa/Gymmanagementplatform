@@ -12,24 +12,17 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  appendAccessEnrollment,
   appendAccessLog,
+  getAccessEnrollments,
   getAccessLog,
   getTurnstileStates,
   updateTurnstile,
+  type AccessEnrollmentRecord,
 } from "../lib/demoStore";
 import { mockFaceIdEnroll, mockFaceIdVerify, mockTurnstileCommand } from "../lib/thirdPartyMocks";
 
 type EnrollPhase = "idle" | "capturing" | "registering";
-
-type EnrollmentRecord = {
-  id: string;
-  memberId: string;
-  displayName: string;
-  terminalId: string;
-  templateId: string;
-  qualityScore: number;
-  atIso: string;
-};
 
 export default function AccessControl() {
   const [log, setLog] = useState(getAccessLog);
@@ -43,7 +36,9 @@ export default function AccessControl() {
   const [enrollTerminal, setEnrollTerminal] = useState("TRN-MAIN-01");
   const [enrollPhase, setEnrollPhase] = useState<EnrollPhase>("idle");
   const [enrollBusy, setEnrollBusy] = useState(false);
-  const [recentEnrollments, setRecentEnrollments] = useState<EnrollmentRecord[]>([]);
+  const [recentEnrollments, setRecentEnrollments] = useState<AccessEnrollmentRecord[]>(
+    () => getAccessEnrollments().slice(0, 12),
+  );
 
   const todayStats = useMemo(() => {
     const start = new Date();
@@ -142,15 +137,13 @@ export default function AccessControl() {
         displayName: enrollName.trim() || undefined,
       });
       const display = enrollName.trim() || mid;
-      const rec: EnrollmentRecord = {
-        id: `ENR-${Date.now()}`,
+      const rec = appendAccessEnrollment({
         memberId: mid,
         displayName: display,
         terminalId: enrollTerminal,
         templateId: res.templateId,
         qualityScore: res.qualityScore,
-        atIso: new Date().toISOString(),
-      };
+      });
       setRecentEnrollments((prev) => [rec, ...prev].slice(0, 12));
       toast.success("Rostro registrado", {
         description: `${display} · Calidad ${(res.qualityScore * 100).toFixed(1)}%`,
@@ -174,9 +167,6 @@ export default function AccessControl() {
   return (
     <div className="h-full bg-[#131313] p-4 md:p-8 overflow-auto">
       <div className="mb-6 md:mb-8">
-        <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] md:tracking-[3px] uppercase mb-2">
-          Biometric_Security_System
-        </p>
         <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
           Access Control
         </h1>
