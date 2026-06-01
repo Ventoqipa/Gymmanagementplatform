@@ -34,7 +34,13 @@ vite.config.ts           # alias `@` → `./src`, plugin de assets Figma
 
 ## Autenticación
 
-`AuthContext` marca `isAuthenticated` en `localStorage`. Es un **placeholder** para demo; no valida credenciales contra un servidor.
+Inicio de sesión contra el API Tanosi (`POST /api/ge/Security/Access/SignIn`):
+
+- **Caso de uso:** `src/app/core/auth/signInUseCase.ts` (validación de usuario/contraseña, IP, `appID`, `typeAccess`).
+- **Cliente HTTP:** `src/app/core/auth/securityApiClient.ts` (errores Tanosi 409 y validación ASP.NET 400).
+- **Persistencia:** token y sesión en `localStorage` vía `authStorage.ts`.
+
+Variables opcionales (ver `.env.example`): `VITE_SECURITY_API_URL`, `VITE_APP_ID`, `VITE_TYPE_ACCESS`.
 
 ## Datos e integraciones mock
 
@@ -66,6 +72,32 @@ npm install
 npm run dev    # servidor de desarrollo Vite
 npm run build  # build de producción en /dist
 ```
+
+## Rutas en producción (recarga en `/login`, etc.)
+
+La app usa **React Router** en el cliente. Si al recargar `https://tudominio.com/login` aparece **404**, el servidor estático no está devolviendo `index.html` para rutas que no son archivos.
+
+Tras `npm run build`, despliega el contenido de **`dist/`** (incluye reglas copiadas desde `public/`):
+
+| Plataforma | Archivo |
+|------------|---------|
+| IIS / Azure App Service | `web.config` |
+| Apache / cPanel | `.htaccess` |
+| Netlify / Cloudflare Pages | `_redirects` |
+| Azure Static Web Apps | `staticwebapp.config.json` |
+| Vercel | `vercel.json` (raíz del repo) |
+| Nginx | ver `nginx.conf.example` |
+
+Sin una de estas reglas, solo funciona la URL raíz (`/`) y la navegación interna; **F5 en `/login` fallará**.
+
+### IIS: error 500 al abrir el sitio
+
+Causas frecuentes:
+
+1. **`mimeMap` duplicado** en `web.config` (ya no se incluye en el del repo).
+2. **Módulo URL Rewrite no instalado** en el servidor: el bloque `<rewrite>` provoca 500.19. Instalar [IIS URL Rewrite](https://www.iis.net/downloads/microsoft/url-rewrite) o desplegar con `public/web.config.minimal` renombrado a `web.config` (solo arregla `/`; para `/login` hace falta URL Rewrite).
+
+Tras `npm run build`, volver a subir **`dist/`** completo, incluido el `web.config` nuevo.
 
 ## Origen del diseño
 
