@@ -16,6 +16,9 @@ function figmaAssetResolver() {
   }
 }
 
+const posApiTarget =
+  process.env.VITE_POS_API_BASE_URL ?? 'https://pos.elitegym247.tanosi.com.mx'
+
 export default defineConfig({
   plugins: [
     figmaAssetResolver(),
@@ -28,6 +31,18 @@ export default defineConfig({
     alias: {
       // Alias @ to the src directory
       '@': path.resolve(__dirname, './src'),
+    },
+  },
+
+  server: {
+    proxy: {
+      // Desarrollo: evita CORS hacia API POS en Neubox
+      '/pos-api': {
+        target: posApiTarget,
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/pos-api/, ''),
+      },
     },
   },
 

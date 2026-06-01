@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   getAccessLog,
   getMembershipIncomeTotal,
   getMembershipPayments,
-  getPosSalesToday,
 } from "../lib/demoStore";
+import { getPosSalesToday, type PosSale } from "@/features/pos";
 
 /** Alineado al listado en Members (demo). */
 const DEMO_ACTIVE_MEMBERS = 1247;
@@ -14,6 +14,7 @@ type TabId = "gym" | "pos";
 export default function Reports() {
   const [tab, setTab] = useState<TabId>("gym");
   const [tick, setTick] = useState(0);
+  const [posToday, setPosToday] = useState<PosSale[]>([]);
 
   const accessLog = useMemo(() => {
     void tick;
@@ -25,9 +26,14 @@ export default function Reports() {
     return getMembershipPayments();
   }, [tick]);
 
-  const posToday = useMemo(() => {
-    void tick;
-    return getPosSalesToday();
+  useEffect(() => {
+    let cancelled = false;
+    void getPosSalesToday().then((sales) => {
+      if (!cancelled) setPosToday(sales);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [tick]);
 
   const posTodayTotal = posToday.reduce((a, s) => a + s.total, 0);

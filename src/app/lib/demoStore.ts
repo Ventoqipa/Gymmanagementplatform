@@ -91,35 +91,6 @@ const initialAccess: AccessLogEntry[] = [
 let payments = [...initialPayments];
 let accessLog = [...initialAccess];
 
-export type PosSale = {
-  id: string;
-  total: number;
-  method: string;
-  dateIso: string;
-  memberId?: string;
-  memberName?: string;
-  linesSummary: string;
-};
-
-const initialPosSales: PosSale[] = [
-  {
-    id: "POS-DEMO-1",
-    total: 64.98,
-    method: "CARD",
-    dateIso: new Date().toISOString(),
-    linesSummary: "ISO WHEY + SHAKER",
-  },
-  {
-    id: "POS-DEMO-2",
-    total: 32.99,
-    method: "QR",
-    dateIso: new Date(Date.now() - 3600000).toISOString(),
-    linesSummary: "PRE-WORKOUT RAGE",
-  },
-];
-
-let posSales = [...initialPosSales];
-
 let turnstiles: TurnstileState[] = [
   {
     terminalId: "TRN-MAIN-01",
@@ -170,28 +141,6 @@ export function appendAccessLog(entry: Omit<AccessLogEntry, "id">) {
   };
   accessLog = [row, ...accessLog];
   return row;
-}
-
-export function addPosSale(sale: Omit<PosSale, "id" | "dateIso"> & { id?: string; dateIso?: string }) {
-  const row: PosSale = {
-    ...sale,
-    id: sale.id ?? `POS-${Date.now()}`,
-    dateIso: sale.dateIso ?? new Date().toISOString(),
-  };
-  posSales = [row, ...posSales];
-  return row;
-}
-
-export function getPosSales(): PosSale[] {
-  return [...posSales].sort(
-    (a, b) => new Date(b.dateIso).getTime() - new Date(a.dateIso).getTime()
-  );
-}
-
-export function getPosSalesToday(): PosSale[] {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  return getPosSales().filter((s) => new Date(s.dateIso) >= start);
 }
 
 export function getMembershipIncomeTotal(): number {

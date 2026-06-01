@@ -24,8 +24,9 @@ src/
     context/AuthContext.tsx   # “Login” demo: persiste solo un flag en localStorage
     pages/               # Pantallas usadas en el router
     components/Layout.tsx     # Shell + navegación
+  features/pos/          # Módulo POS reutilizable (REST + UI); ver features/pos/README.md
   app/lib/
-    demoStore.ts         # Estado en memoria: pagos, log de accesos, torniquetes, ventas POS
+    demoStore.ts         # Estado en memoria: pagos, accesos, torniquetes (ventas POS → features/pos)
     thirdPartyMocks.ts   # mockFaceIdVerify / mockTurnstileCommand (sustituir por fetch)
   styles/index.css
   imports/               # Artefactos exportados desde Figma (no usados por todas las rutas)
@@ -49,7 +50,7 @@ Variables opcionales (ver `.env.example`): `VITE_SECURITY_API_URL`, `VITE_APP_ID
 - **`MembershipPayment`**: pagos de membresía; se listan en **Members** y **Reports**.
 - **`AccessLogEntry`**: eventos de acceso tras simulación; compartidos con **Reports**.
 - **`TurnstileState`**: estado por terminal actualizado al simular flujo de acceso.
-- **`PosSale`**: cada checkout en **POS** registra una venta; **Reports → Punto de venta** agrega las del día.
+- Ventas POS: módulo **`src/features/pos`** (REST Neubox + fallback memoria). **Reports → Punto de venta** llama `getPosSalesToday()`.
 
 Todo se pierde al **recargar la página** (memoria del navegador).
 
