@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Usar SOLO si el web.config principal sigue dando 500 en IIS.
+  Renombrar a web.config en dist/ tras el build.
+
+  - Quita reglas de rewrite (recarga en /login seguirá en 404 hasta instalar URL Rewrite).
+  - Evita errores por mimeMap duplicados o módulo rewrite ausente.
+-->
+<configuration>
+  <system.webServer>
+    <defaultDocument enabled="true">
+      <files>
+        <clear />
+        <add value="index.html" />
+      </files>
+    </defaultDocument>
+  </system.webServer>
+</configuration>

@@ -1,0 +1,4 @@
+# Ejemplo para Nginx: copiar dentro del server { } que sirve el contenido de /dist
+location / {
+  try_files $uri $uri/ /index.html;
+}

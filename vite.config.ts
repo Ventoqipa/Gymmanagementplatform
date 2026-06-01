@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
@@ -7,7 +7,7 @@ import react from '@vitejs/plugin-react'
 function figmaAssetResolver() {
   return {
     name: 'figma-asset-resolver',
-    resolveId(id) {
+    resolveId(id: string) {
       if (id.startsWith('figma:asset/')) {
         const filename = id.replace('figma:asset/', '')
         return path.resolve(__dirname, 'src/assets', filename)
@@ -16,21 +16,49 @@ function figmaAssetResolver() {
   }
 }
 
-export default defineConfig({
-  plugins: [
-    figmaAssetResolver(),
-    // The React and Tailwind plugins are both required for Make, even if
-    // Tailwind is not being actively used – do not remove them
-    react(),
-    tailwindcss(),
-  ],
-  resolve: {
-    alias: {
-      // Alias @ to the src directory
-      '@': path.resolve(__dirname, './src'),
-    },
-  },
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
 
-  // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
-  assetsInclude: ['**/*.svg', '**/*.csv'],
+  const securityProxyTarget =
+    env.VITE_SECURITY_API_PROXY_TARGET ?? 'https://apisecuritygetest.tanosi.com.mx'
+  const posProxyTarget =
+    env.VITE_POS_API_PROXY_TARGET ?? 'https://pos.elitegym247.tanosi.com.mx'
+
+  return {
+    plugins: [
+      figmaAssetResolver(),
+      react(),
+      tailwindcss(),
+    ],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
+    },
+
+    server: {
+      proxy: {
+        /**
+         * El navegador llama a localhost/security-api → Vite reenvía al API real.
+         * Postman no necesita esto; el browser sí (política CORS).
+         */
+        '/security-api': {
+          target: securityProxyTarget,
+          changeOrigin: true,
+          // Neubox: el certificado a veces es del host svw*.serverneubox.com.mx
+          // y no del subdominio apisecuritygetest.* — Postman lo tolera, Node no.
+          secure: false,
+          rewrite: (p) => p.replace(/^\/security-api/, ''),
+        },
+        '/pos-api': {
+          target: posProxyTarget,
+          changeOrigin: true,
+          secure: false,
+          rewrite: (p) => p.replace(/^\/pos-api/, ''),
+        },
+      },
+    },
+
+    assetsInclude: ['**/*.svg', '**/*.csv'],
+  }
 })
