@@ -53,7 +53,7 @@ Los navegadores bloquean peticiones a otro dominio si el API no envía cabeceras
 
 ### Proxy temporal IIS (Neubox) — producción
 
-Mientras el certificado de `apisecuritygetest.tanosi.com.mx` no esté bien en Neubox:
+Mientras el certificado de `apisecurityegtest.tanosi.com.mx` no esté bien en Neubox:
 
 1. **Build** (usa `.env.production` con rutas relativas):
    ```bash

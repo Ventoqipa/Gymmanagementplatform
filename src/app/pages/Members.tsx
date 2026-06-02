@@ -197,11 +197,20 @@ function clampRenewalDate(enrollmentIso: string, renewalIso: string): string {
   return renewalIso;
 }
 
-/** Periodos de membresía hasta renovación: 1–12 meses desde la alta (tope: 1 año). */
+/** Periodos de membresía hasta renovación (tope: 1 año desde la alta). */
+function renewalAfterPeriod(
+  enrollmentIso: string,
+  period: { days?: number; weeks?: number; months?: number },
+): string {
+  const d = new Date(enrollmentIso + "T12:00:00");
+  if (period.days) d.setDate(d.getDate() + period.days);
+  else if (period.weeks) d.setDate(d.getDate() + period.weeks * 7);
+  else if (period.months) d.setMonth(d.getMonth() + period.months);
+  return clampRenewalDate(enrollmentIso, d.toISOString().slice(0, 10));
+}
+
 function renewalAfterMonths(enrollmentIso: string, months: number): string {
-  const capped = Math.min(12, Math.max(1, Math.floor(months)));
-  const candidate = addMonthsIso(enrollmentIso, capped);
-  return clampRenewalDate(enrollmentIso, candidate);
+  return renewalAfterPeriod(enrollmentIso, { months });
 }
 
 const emptyNewMemberForm = () => {
@@ -573,7 +582,7 @@ export default function Members() {
     <div className="h-full bg-[#131313] p-4 md:p-8">
       <div className="mb-6 md:mb-8">
         <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
-          Members
+          Miembros
         </h1>
       </div>
 
@@ -582,11 +591,11 @@ export default function Members() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
           <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
-            Members_Directory
+            Directorio de miembros
           </p>
           <div className="flex items-center gap-3">
             <span className="text-[#808080] text-[10px]">
-              Showing {startIndex + 1}-{Math.min(endIndex, filteredMembers.length)} of {filteredMembers.length}
+              Mostrando {startIndex + 1}-{Math.min(endIndex, filteredMembers.length)} de {filteredMembers.length}
             </span>
             <button
               type="button"
@@ -594,7 +603,7 @@ export default function Members() {
               className="bg-[#e31e24] text-white px-4 py-2 flex items-center gap-2 text-[10px] font-bold tracking-[1px] uppercase hover:bg-[#c41a20] transition-colors"
             >
               <UserPlus size={14} />
-              Add Member
+              Agregar miembro
             </button>
           </div>
         </div>
@@ -665,19 +674,19 @@ export default function Members() {
               <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">ID</span>
             </div>
             <div className="col-span-3">
-              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Member Name</span>
+              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Nombre</span>
             </div>
             <div className="col-span-2">
-              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Tier</span>
+              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Rango</span>
             </div>
             <div className="col-span-2">
-              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Enrollment</span>
+              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Alta</span>
             </div>
             <div className="col-span-3">
-              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Renewal · vigencia</span>
+              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Vigencia</span>
             </div>
             <div className="col-span-1 text-center">
-              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Visits</span>
+              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Visitas</span>
             </div>
           </div>
 
@@ -802,7 +811,7 @@ export default function Members() {
                         className="inline-flex items-center justify-center gap-2 bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] px-4 py-2.5 text-[10px] font-bold tracking-[1px] uppercase hover:border-[#e31e24] transition-colors"
                       >
                         <ShoppingCart size={14} />
-                        Vender en POS
+                        Vender en tienda
                       </button>
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded border border-[rgba(93,63,60,0.12)] bg-[#0e0e0e] px-4 py-3">
@@ -963,7 +972,7 @@ export default function Members() {
                               />
                             </a>
                             <p className="text-[#393939] text-[9px] mt-2">
-                              Clic para abrir en pestaña nueva (demo).
+                              Clic para abrir en pestaña nueva.
                             </p>
                           </div>
                         )}
@@ -976,7 +985,7 @@ export default function Members() {
                         Historial de pagos (membresía)
                       </p>
                       {paymentsForExpanded.length === 0 ? (
-                        <p className="text-[#808080] text-[12px]">Sin pagos registrados en demo.</p>
+                        <p className="text-[#808080] text-[12px]">Sin pagos registrados.</p>
                       ) : (
                         <div className="overflow-x-auto">
                           <table className="w-full text-left text-[11px]">
@@ -1334,9 +1343,7 @@ export default function Members() {
                   rows={3}
                   className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none font-['Space_Grotesk',sans-serif] text-[13px] sm:text-[14px] resize-y min-h-[80px] placeholder:text-[#5a5a5a]"
                 />
-                <p className="text-[#393939] text-[9px] mt-1.5">
-                  Opcional en demo; útil para contrato y contacto.
-                </p>
+               
               </div>
 
               <div className="min-w-0 overflow-hidden rounded-sm bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4">
@@ -1478,19 +1485,21 @@ export default function Members() {
                 <div className="flex flex-wrap gap-2">
                   {(
                     [
-                      { m: 1, label: "1 mes" },
-                      { m: 3, label: "3 meses" },
-                      { m: 6, label: "6 meses" },
-                      { m: 12, label: "12 meses" },
+                      { key: "1d", label: "1 día", period: { days: 1 } },
+                      { key: "1w", label: "1 semana", period: { weeks: 1 } },
+                      { key: "1m", label: "1 mes", period: { months: 1 } },
+                      { key: "3m", label: "3 meses", period: { months: 3 } },
+                      { key: "6m", label: "6 meses", period: { months: 6 } },
+                      { key: "12m", label: "12 meses", period: { months: 12 } },
                     ] as const
-                  ).map(({ m, label }) => (
+                  ).map(({ key, label, period }) => (
                     <button
-                      key={m}
+                      key={key}
                       type="button"
                       onClick={() =>
                         setNewMemberForm((f) => ({
                           ...f,
-                          renewalDate: renewalAfterMonths(f.enrollmentDate, m),
+                          renewalDate: renewalAfterPeriod(f.enrollmentDate, period),
                         }))
                       }
                       className="px-3 py-2 text-[10px] font-bold uppercase tracking-wide bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24] hover:text-white transition-colors"

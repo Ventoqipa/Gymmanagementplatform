@@ -68,7 +68,7 @@ export default function Layout() {
             }
           >
             <LayoutDashboard size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">Dashboard</span>
+            <span className="font-bold text-xs tracking-wide uppercase">Inicio</span>
           </NavLink>
 
           <NavLink
@@ -83,7 +83,7 @@ export default function Layout() {
             }
           >
             <ScanFace size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">Access Control</span>
+            <span className="font-bold text-xs tracking-wide uppercase">Control de acceso</span>
           </NavLink>
 
           <NavLink
@@ -98,7 +98,7 @@ export default function Layout() {
             }
           >
             <Users size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">Members</span>
+            <span className="font-bold text-xs tracking-wide uppercase">Miembros</span>
           </NavLink>
 
           <NavLink
@@ -113,7 +113,7 @@ export default function Layout() {
             }
           >
             <ShoppingCart size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">POS Terminal</span>
+            <span className="font-bold text-xs tracking-wide uppercase">Tienda</span>
           </NavLink>
 
           <NavLink
@@ -128,7 +128,7 @@ export default function Layout() {
             }
           >
             <BarChart3 size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">Reports</span>
+            <span className="font-bold text-xs tracking-wide uppercase">Reportes</span>
           </NavLink>
         </nav>
 
@@ -136,11 +136,11 @@ export default function Layout() {
         <div className="p-4 border-t border-[rgba(93,63,60,0.1)] space-y-3">
           <div className="space-y-2">
             <div className="flex items-center justify-between text-[10px]">
-              <span className="text-[#808080] uppercase tracking-[1px]">System Status</span>
+              <span className="text-[#808080] uppercase tracking-[1px]">Estatus del sistema</span>
               <span className="text-[#00ff00] font-bold">ONLINE</span>
             </div>
             <div className="flex items-center justify-between text-[10px]">
-              <span className="text-[#808080] uppercase tracking-[1px]">Terminals</span>
+              <span className="text-[#808080] uppercase tracking-[1px]">Dispositivos</span>
               <span className="text-[#e5e2e1] font-bold">1/3 ACTIVE</span>
             </div>
           </div>

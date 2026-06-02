@@ -90,7 +90,7 @@ export default function Login() {
                 htmlFor="usuario"
                 className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2"
               >
-                Usuario
+                Usuario (Hermes ID)
               </label>
               <div className="relative">
                 <User
@@ -108,7 +108,7 @@ export default function Login() {
                   }}
                   disabled={isSubmitting}
                   className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] pl-11 pr-4 py-3 focus:border-[#e31e24] focus:outline-none transition-colors font-['Space_Grotesk',sans-serif] disabled:opacity-60"
-                  placeholder="Ej. H251"
+                  placeholder="Ej. h251"
                 />
               </div>
             </div>

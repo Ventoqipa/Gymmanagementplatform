@@ -168,7 +168,7 @@ export default function AccessControl() {
     <div className="h-full bg-[#131313] p-4 md:p-8 overflow-auto">
       <div className="mb-6 md:mb-8">
         <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
-          Access Control
+          Control de acceso
         </h1>
         <p className="text-[#808080] text-[12px] mt-3 max-w-3xl leading-relaxed">
           Control de accesos por reconocimiento facial y sincronización con torniquetes en tiempo real.
@@ -305,7 +305,7 @@ export default function AccessControl() {
             Nuevo rostro FaceID
           </h2>
           <p className="text-[#808080] text-[11px] mb-6 leading-relaxed">
-            Asocie la plantilla facial de un socio al sistema. Utilice el mismo terminal donde el miembro realizará el
+            Asocie la plantilla facial de un miembro al sistema. Utilice el mismo terminal donde el miembro realizará el
             registro guiado.
           </p>
 

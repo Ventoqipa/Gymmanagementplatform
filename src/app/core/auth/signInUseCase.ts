@@ -43,7 +43,8 @@ export async function signInUseCase(
     return { ok: false, message: validationError };
   }
 
-  const ipAddress = (await getClientIpAddress()).trim();
+  const ipAddress =
+    securityConfig.signInIpAddress || (await getClientIpAddress()).trim();
   if (!ipAddress) {
     return { ok: false, message: "No se pudo determinar la dirección IP." };
   }

@@ -1,7 +1,14 @@
 import { loadPosSales } from "@/features/pos/infrastructure/localPosStorage";
 import type { PosSale } from "@/features/pos/domain/types";
 import { getAccessLog, getMembershipPayments } from "./demoStore";
+import { ACTIVITY, isIsoInRange } from "./labels";
 import { getActiveMembersCount, loadMembers } from "./membersStore";
+
+export function getPosSalesInRange(fromDate: string, toDate: string): PosSale[] {
+  return loadPosSales()
+    .filter((s) => isIsoInRange(s.dateIso, fromDate, toDate))
+    .sort((a, b) => new Date(b.dateIso).getTime() - new Date(a.dateIso).getTime());
+}
 
 export function getPosSalesTodaySync(): PosSale[] {
   const start = new Date();
@@ -35,10 +42,10 @@ export function getDailyCheckIns(): number {
 
 export function getPeakHoursSlots(): { time: string; value: number; label: string }[] {
   const buckets = [
-    { time: "05:00-07:00", label: "Morning Peak", start: 5, end: 7 },
-    { time: "12:00-14:00", label: "Lunch Rush", start: 12, end: 14 },
-    { time: "17:00-20:00", label: "Evening Peak", start: 17, end: 20 },
-    { time: "20:00-22:00", label: "Night Shift", start: 20, end: 22 },
+    { time: "05:00-07:00", label: "Mañana", start: 5, end: 7 },
+    { time: "12:00-14:00", label: "Mediodía", start: 12, end: 14 },
+    { time: "17:00-20:00", label: "Tarde-noche", start: 17, end: 20 },
+    { time: "20:00-22:00", label: "Noche", start: 20, end: 22 },
   ];
   const granted = getAccessLog().filter((e) => e.result === "GRANTED");
   const maxInBucket = Math.max(
@@ -88,7 +95,7 @@ export function getRecentActivity(limit = 8): ActivityRow[] {
   for (const e of getAccessLog().slice(0, 20)) {
     if (e.result !== "GRANTED") continue;
     rows.push({
-      action: "MEMBER_CHECKIN",
+      action: ACTIVITY.MEMBER_CHECKIN,
       name: e.memberName,
       tier: e.tier,
       time: relativeTime(e.timestampIso),
@@ -98,7 +105,7 @@ export function getRecentActivity(limit = 8): ActivityRow[] {
 
   for (const s of getPosSalesTodaySync().slice(0, 10)) {
     rows.push({
-      action: "POS_SALE",
+      action: ACTIVITY.CARRITO_COMPRAS,
       name: s.memberName ?? s.linesSummary.slice(0, 40),
       tier: s.method,
       time: relativeTime(s.dateIso),
@@ -109,7 +116,7 @@ export function getRecentActivity(limit = 8): ActivityRow[] {
   const payments = getMembershipPayments().slice(0, 10);
   for (const p of payments) {
     rows.push({
-      action: "MEMBERSHIP_PAYMENT",
+      action: ACTIVITY.MEMBERSHIP_PAYMENT,
       name: p.memberId,
       tier: p.concept,
       time: relativeTime(p.dateIso),
@@ -122,13 +129,21 @@ export function getRecentActivity(limit = 8): ActivityRow[] {
     .slice(0, limit);
 }
 
-export function computeTopProducts(limit = 5): {
+export function computeTopProducts(
+  limit = 5,
+  fromDate?: string,
+  toDate?: string,
+): {
   name: string;
   sales: number;
   units: number;
 }[] {
+  const sales =
+    fromDate && toDate
+      ? getPosSalesInRange(fromDate, toDate)
+      : loadPosSales();
   const map = new Map<string, { name: string; sales: number; units: number }>();
-  for (const sale of loadPosSales()) {
+  for (const sale of sales) {
     for (const line of sale.lines ?? []) {
       const prev = map.get(line.productId) ?? {
         name: line.name,

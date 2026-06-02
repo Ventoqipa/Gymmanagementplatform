@@ -1,4 +1,7 @@
-/** Cuerpo enviado a POST /api/ge/Security/Access/SignIn */
+/**
+ * POST /api/ge/Security/Access/SignIn
+ * @example { hermesID: "h251", userPass: "…", ipAddress: "10.2.2.2", typeAccess: "W", appID: 5 }
+ */
 export type SignInRequestBody = {
   hermesID: string;
   userPass: string;

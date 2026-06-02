@@ -24,7 +24,7 @@ if ($path === '' || $path[0] !== '/') {
 }
 
 $targets = [
-    'security' => 'https://apisecuritygetest.tanosi.com.mx',
+    'security' => 'https://apisecurityegtest.tanosi.com.mx',
     'pos' => 'https://pos.elitegym247.tanosi.com.mx',
 ];
 

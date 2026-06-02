@@ -3,6 +3,7 @@ import { useLocation } from "react-router";
 import { Search, Plus, Minus, Trash2, CreditCard, Banknote, QrCode, X, Package, User, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import type { PosSale } from "../../features/pos/domain/types";
+import { PAYMENT_METHOD, PRODUCT_CATEGORY } from "../lib/labels";
 import {
   loadPosProducts,
   loadPosSales,
@@ -22,8 +23,6 @@ interface CartItem extends Product {
   quantity: number;
 }
 
-type IvaRegimen = "general" | "frontera";
-
 type TicketReceipt = {
   id: string;
   lines: { name: string; id: string; qty: number; unit: number; lineTotal: number }[];
@@ -33,22 +32,6 @@ type TicketReceipt = {
   paymentMethod: string;
   member?: { id?: string; name?: string };
   createdIso: string;
-  ivaRegimen: IvaRegimen;
-  ivaRate: number;
-  ivaLabelShort: string;
-};
-
-/**
- * Impuesto al Valor Agregado (LIVA) — tasas vigentes en México:
- * - 16% tasa general (mayoría del territorio nacional).
- * - 8% estímulo en región fronteriza norte (cumplimiento de requisitos ante el SAT).
- */
-const IVA_TASA_GENERAL = 0.16;
-const IVA_TASA_FRONTERA = 0.08;
-
-const IVA_REGIMEN_LABEL: Record<IvaRegimen, string> = {
-  general: "IVA 16%",
-  frontera: "IVA 8%",
 };
 
 export default function POS() {
@@ -63,16 +46,14 @@ export default function POS() {
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [ticketReceipt, setTicketReceipt] = useState<TicketReceipt | null>(null);
-  const [ivaRegimen, setIvaRegimen] = useState<IvaRegimen>("general");
-
   useEffect(() => {
     savePosProducts(products);
   }, [products]);
 
   useEffect(() => {
     if (linkedMember?.memberName) {
-      toast.info(`POS vinculado a ${linkedMember.memberName}`, {
-        description: "La venta queda asociada al socio en el ticket.",
+      toast.info(`Tienda vinculada a ${linkedMember.memberName}`, {
+        description: "La venta queda asociada al miembro en el ticket.",
       });
     }
   }, [linkedMember?.memberId, linkedMember?.memberName]);
@@ -237,19 +218,14 @@ export default function POS() {
     setPaymentMethod("");
   };
 
-  const ivaRate = ivaRegimen === "general" ? IVA_TASA_GENERAL : IVA_TASA_FRONTERA;
-
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const tax = subtotal * ivaRate;
-  const total = subtotal + tax;
+  const total = subtotal;
 
   const handleCheckout = () => {
     if (cart.length === 0 || !paymentMethod) return;
 
     const sub = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const rate = ivaRegimen === "general" ? IVA_TASA_GENERAL : IVA_TASA_FRONTERA;
-    const tx = sub * rate;
-    const tot = sub + tx;
+    const tot = sub;
     const tid = `TKT-${Date.now().toString(36).toUpperCase()}`;
 
     const receipt: TicketReceipt = {
@@ -262,7 +238,7 @@ export default function POS() {
         lineTotal: c.price * c.quantity,
       })),
       subtotal: sub,
-      tax: tx,
+      tax: 0,
       total: tot,
       paymentMethod,
       member:
@@ -270,9 +246,9 @@ export default function POS() {
           ? { id: linkedMember.memberId, name: linkedMember.memberName }
           : undefined,
       createdIso: new Date().toISOString(),
-      ivaRegimen,
-      ivaRate: rate,
-      ivaLabelShort: IVA_REGIMEN_LABEL[ivaRegimen],
+      ivaRegimen: "general",
+      ivaRate: 0,
+      ivaLabelShort: "",
     };
 
     const updatedProducts = products.map((p) => {
@@ -292,8 +268,8 @@ export default function POS() {
       linesSummary: receipt.lines.map((l) => `${l.qty}× ${l.name}`).join(" · "),
       memberId: receipt.member?.id,
       memberName: receipt.member?.name,
-      ivaRegimen: receipt.ivaRegimen,
-      ivaRate: receipt.ivaRate,
+      ivaRegimen: "general",
+      ivaRate: 0,
       lines: cart.map((c) => ({
         productId: c.id,
         name: c.name,
@@ -317,7 +293,7 @@ export default function POS() {
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
-            POS Terminal
+            Tienda
           </h1>
         </div>
 
@@ -325,7 +301,7 @@ export default function POS() {
           <div className="mb-6 flex items-center gap-3 bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] px-4 py-3">
             <User className="text-[#e31e24] shrink-0" size={20} />
             <div>
-              <p className="text-[10px] text-[#808080] uppercase font-bold tracking-wide">Cliente seleccionado desde Members</p>
+              <p className="text-[10px] text-[#808080] uppercase font-bold tracking-wide">Cliente seleccionado desde Miembros</p>
               <p className="text-[#e5e2e1] text-[14px] font-bold">
                 {linkedMember.memberName}{" "}
                 <span className="text-[#808080] font-mono text-[12px] font-normal">({linkedMember.memberId})</span>
@@ -346,7 +322,7 @@ export default function POS() {
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="SCAN_SKU_OR_SEARCH_PRODUCT..."
+                    placeholder="Buscar por SKU o nombre..."
                     className="w-full bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] pl-11 pr-4 py-3 focus:border-[#e31e24] focus:outline-none transition-colors font-['Space_Grotesk',sans-serif] text-[14px]"
                   />
                 </div>
@@ -357,7 +333,7 @@ export default function POS() {
               >
                 <Package size={18} />
                 <span className="text-[10px] font-bold tracking-[1px] uppercase whitespace-nowrap">
-                  Add Product
+                  Agregar producto
                 </span>
               </button>
             </div>
@@ -374,7 +350,7 @@ export default function POS() {
                       : "bg-[#0e0e0e] text-[#808080] border border-[rgba(93,63,60,0.2)] hover:border-[#e31e24]"
                   }`}
                 >
-                  {category}
+                  {PRODUCT_CATEGORY[category] ?? category}
                 </button>
               ))}
             </div>
@@ -439,7 +415,7 @@ export default function POS() {
                       ${product.price.toFixed(2)}
                     </span>
                     <span className="text-[#808080] text-[10px]">
-                      STOCK: {product.stock}
+                      Existencia: {product.stock}
                     </span>
                   </div>
                 </div>
@@ -453,7 +429,7 @@ export default function POS() {
             <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4">
               <div className="flex justify-between items-center">
                 <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
-                  Current_Transaction
+                  Carrito de compras
                 </p>
                 {cart.length > 0 && (
                   <button
@@ -470,7 +446,7 @@ export default function POS() {
             <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 min-h-[300px] max-h-[400px] overflow-auto">
               {cart.length === 0 ? (
                 <div className="flex items-center justify-center h-full">
-                  <p className="text-[#808080] text-[12px]">Cart is empty</p>
+                  <p className="text-[#808080] text-[12px]">El carrito está vacío</p>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -522,32 +498,9 @@ export default function POS() {
             </div>
 
             {/* Totals */}
-            <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 space-y-3">
-              <div>
-                <label className="text-[#808080] text-[10px] font-bold uppercase tracking-wide block mb-1.5">
-                  Régimen IVA (México · LIVA)
-                </label>
-                <select
-                  value={ivaRegimen}
-                  onChange={(e) => setIvaRegimen(e.target.value as IvaRegimen)}
-                  className="w-full bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2 text-[11px] focus:border-[#e31e24] focus:outline-none"
-                >
-                  <option value="general">16% — Tasa general</option>
-                  <option value="frontera">8% — Estímulo frontera norte (requisitos SAT)</option>
-                </select>
-              </div>
-              <div className="flex justify-between text-[12px]">
-                <span className="text-[#808080]">SUBTOTAL</span>
-                <span className="text-[#e5e2e1] font-bold">${subtotal.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-[12px]">
-                <span className="text-[#808080]">
-                  {IVA_REGIMEN_LABEL[ivaRegimen]} <span className="text-[#5a5a5a] normal-case">(LIVA)</span>
-                </span>
-                <span className="text-[#e5e2e1] font-bold">${tax.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-[20px] pt-2 border-t border-[rgba(93,63,60,0.2)]">
-                <span className="text-[#e31e24] font-black">TOTAL</span>
+            <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4">
+              <div className="flex justify-between text-[20px]">
+                <span className="text-[#e31e24] font-black">Total</span>
                 <span className="text-[#e5e2e1] font-black">${total.toFixed(2)} MXN</span>
               </div>
             </div>
@@ -556,7 +509,7 @@ export default function POS() {
             {cart.length > 0 && (
               <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4">
                 <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-3">
-                  Payment_Method
+                  Método de pago
                 </p>
                 <div className="space-y-2">
                   {[
@@ -593,7 +546,7 @@ export default function POS() {
                   : "bg-[#1a1a1a] text-[#393939] cursor-not-allowed"
               }`}
             >
-              Complete Transaction
+              Completar venta
             </button>
           </div>
         </div>
@@ -649,9 +602,9 @@ export default function POS() {
                   onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
                   className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none transition-colors font-['Space_Grotesk',sans-serif]"
                 >
-                  <option value="SUPPLEMENTS">SUPPLEMENTS</option>
-                  <option value="GEAR">GEAR</option>
-                  <option value="ACCESSORIES">ACCESSORIES</option>
+                  <option value="SUPPLEMENTS">Suplementos</option>
+                  <option value="GEAR">Ropa</option>
+                  <option value="ACCESSORIES">Accesorios</option>
                 </select>
               </div>
 
@@ -771,9 +724,9 @@ export default function POS() {
                   onChange={(e) => setEditProduct({ ...editProduct, category: e.target.value })}
                   className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none transition-colors font-['Space_Grotesk',sans-serif]"
                 >
-                  <option value="SUPPLEMENTS">SUPPLEMENTS</option>
-                  <option value="GEAR">GEAR</option>
-                  <option value="ACCESSORIES">ACCESSORIES</option>
+                  <option value="SUPPLEMENTS">Suplementos</option>
+                  <option value="GEAR">Ropa</option>
+                  <option value="ACCESSORIES">Accesorios</option>
                 </select>
               </div>
 
@@ -877,28 +830,19 @@ export default function POS() {
                 ))}
               </div>
               <div className="border-t border-[#ccc] pt-3 space-y-1 text-[12px]">
-                <div className="flex justify-between">
-                  <span className="text-[#666]">Subtotal</span>
-                  <span>${ticketReceipt.subtotal.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#666]">
-                    {ticketReceipt.ivaLabelShort}{" "}
-                    <span className="text-[10px]">(LIVA — {(ticketReceipt.ivaRate * 100).toFixed(0)}%)</span>
-                  </span>
-                  <span>${ticketReceipt.tax.toFixed(2)}</span>
-                </div>
                 <div className="flex justify-between text-[18px] font-black pt-2">
-                  <span>TOTAL</span>
+                  <span>Total</span>
                   <span>${ticketReceipt.total.toFixed(2)} MXN</span>
                 </div>
               </div>
               <p className="text-[11px] uppercase tracking-wide">
-                Pago: <span className="font-bold">{ticketReceipt.paymentMethod}</span>
+                Pago:{" "}
+                <span className="font-bold">
+                  {PAYMENT_METHOD[ticketReceipt.paymentMethod] ?? ticketReceipt.paymentMethod}
+                </span>
               </p>
               <p className="text-[10px] text-[#888] text-center pt-2 leading-relaxed">
-                Montos en pesos mexicanos (MXN). IVA según Ley del Impuesto al Valor Agregado. Tasa 8% solo con
-                acreditación en región fronteriza ante el SAT.
+                Montos en pesos mexicanos (MXN).
               </p>
             </div>
             <div className="px-6 pb-6">

@@ -3,6 +3,7 @@
  * Inicia vacío; cada alta/venta/acceso se persiste en el navegador.
  */
 
+import { isIsoInRange } from "./labels";
 import { loadJson, saveJson } from "./storage";
 
 const KEYS = {
@@ -135,6 +136,30 @@ export function appendAccessLog(entry: Omit<AccessLogEntry, "id">) {
 
 export function getMembershipIncomeTotal(): number {
   return payments.reduce((acc, p) => acc + p.amount, 0);
+}
+
+export function getMembershipIncomeInRange(fromDate: string, toDate: string): number {
+  return payments
+    .filter((p) => isIsoInRange(p.dateIso, fromDate, toDate))
+    .reduce((acc, p) => acc + p.amount, 0);
+}
+
+export function getMembershipPaymentsInRange(
+  fromDate: string,
+  toDate: string,
+): MembershipPayment[] {
+  return getMembershipPayments().filter((p) =>
+    isIsoInRange(p.dateIso, fromDate, toDate),
+  );
+}
+
+export function getAccessLogInRange(
+  fromDate: string,
+  toDate: string,
+): AccessLogEntry[] {
+  return getAccessLog().filter((e) =>
+    isIsoInRange(e.timestampIso, fromDate, toDate),
+  );
 }
 
 export function getTurnstileStates(): TurnstileState[] {

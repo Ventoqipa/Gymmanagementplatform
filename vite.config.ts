@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   const securityProxyTarget =
-    env.VITE_SECURITY_API_PROXY_TARGET ?? 'https://apisecuritygetest.tanosi.com.mx'
+    env.VITE_SECURITY_API_PROXY_TARGET ?? 'https://apisecurityegtest.tanosi.com.mx'
   const posProxyTarget =
     env.VITE_POS_API_PROXY_TARGET ?? 'https://pos.elitegym247.tanosi.com.mx'
 
@@ -46,7 +46,7 @@ export default defineConfig(({ mode }) => {
           target: securityProxyTarget,
           changeOrigin: true,
           // Neubox: el certificado a veces es del host svw*.serverneubox.com.mx
-          // y no del subdominio apisecuritygetest.* — Postman lo tolera, Node no.
+          // y no del subdominio apisecurityegtest.* — Postman lo tolera, Node no.
           secure: false,
           rewrite: (p) => p.replace(/^\/security-api/, ''),
         },

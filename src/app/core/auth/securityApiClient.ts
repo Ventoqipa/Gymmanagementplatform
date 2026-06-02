@@ -36,7 +36,7 @@ export async function postSignIn(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Accept: "application/json",
+        Accept: "*/*",
       },
       body: JSON.stringify(body),
     });

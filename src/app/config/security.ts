@@ -10,9 +10,11 @@ const securityApiBaseUrl = resolveApiBaseUrl({
 
 export const securityConfig = {
   apiBaseUrl: securityApiBaseUrl,
-  signInPath: "/api/ge/Security/Access/SignIn",
+  signInPath: "/api/eg/Security/Access/SignIn",
   appId: Number(import.meta.env.VITE_APP_ID ?? "5"),
   typeAccess: (import.meta.env.VITE_TYPE_ACCESS ?? "W").trim(),
+  /** Si está definida, se envía en SignIn en lugar de detectar IP pública (útil en dev). */
+  signInIpAddress: (import.meta.env.VITE_SIGNIN_IP_ADDRESS ?? "").trim(),
 } as const;
 
 export function getSignInUrl(): string {

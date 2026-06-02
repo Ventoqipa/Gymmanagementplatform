@@ -9,9 +9,9 @@ import {
 } from "../lib/platformStats";
 
 function formatMoney(n: number): string {
-  return n.toLocaleString("en-US", {
+  return n.toLocaleString("es-MX", {
     style: "currency",
-    currency: "USD",
+    currency: "MXN",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
@@ -33,7 +33,7 @@ export default function Dashboard() {
     <div className="p-4 md:p-8 space-y-6 md:space-y-8">
       <div>
         <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
-          Dashboard
+          Inicio
         </h1>
         <p className="text-[#808080] text-[11px] mt-2">
           Métricas calculadas desde los datos guardados en este navegador.
@@ -45,15 +45,15 @@ export default function Dashboard() {
           <div className="flex items-start justify-between mb-4">
             <Activity className="text-[#e31e24]" size={24} />
             {checkIns > 0 && (
-              <span className="text-[10px] text-[#00ff00] font-bold tracking-[1px]">LIVE</span>
+              <span className="text-[10px] text-[#00ff00] font-bold tracking-[1px]">EN VIVO</span>
             )}
           </div>
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-            Current Capacity
+            Ocupación estimada
           </p>
           <p className="text-[#e5e2e1] text-[32px] font-black leading-none">{capacityPct}%</p>
           <p className="text-[#808080] text-[10px] mt-2">
-            {checkIns}/{activeMembers || "—"} accesos hoy vs socios activos
+            {checkIns}/{activeMembers || "—"} accesos hoy vs miembros activos
           </p>
         </div>
 
@@ -62,7 +62,7 @@ export default function Dashboard() {
             <Users className="text-[#e31e24]" size={24} />
           </div>
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-            Daily Check-ins
+            Accesos hoy
           </p>
           <p className="text-[#e5e2e1] text-[32px] font-black leading-none">{checkIns}</p>
           <p className="text-[#808080] text-[10px] mt-2">Accesos otorgados hoy</p>
@@ -73,7 +73,7 @@ export default function Dashboard() {
             <DollarSign className="text-[#e31e24]" size={24} />
           </div>
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-            Revenue Today
+            Ingresos hoy
           </p>
           <p className="text-[#e5e2e1] text-[32px] font-black leading-none">
             {formatMoney(revenue.total)}
@@ -88,10 +88,10 @@ export default function Dashboard() {
             <TrendingUp className="text-[#e31e24]" size={24} />
           </div>
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-            Active Members
+            Miembros activos
           </p>
           <p className="text-[#e5e2e1] text-[32px] font-black leading-none">
-            {activeMembers.toLocaleString("en-US")}
+            {activeMembers.toLocaleString("es-MX")}
           </p>
           <p className="text-[#808080] text-[10px] mt-2">Membresía vigente hoy</p>
         </div>
@@ -99,7 +99,7 @@ export default function Dashboard() {
 
       <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
-          Peak_Hours_Analysis
+          Horas pico
         </p>
         <div className="space-y-3">
           {peakSlots.map((slot) => (
@@ -121,11 +121,11 @@ export default function Dashboard() {
 
       <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
-          Recent_Activity_Log
+          Actividad reciente
         </p>
         {activity.length === 0 ? (
           <p className="text-[#808080] text-[12px]">
-            Sin actividad registrada. Los accesos, pagos y ventas POS aparecerán aquí.
+            Sin actividad registrada. Los accesos, pagos y ventas de la tienda aparecerán aquí.
           </p>
         ) : (
           <div className="space-y-3">
