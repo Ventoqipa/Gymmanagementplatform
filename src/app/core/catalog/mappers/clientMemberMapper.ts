@@ -19,27 +19,63 @@ export function clientIdFromMemberId(memberId: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-export function clientToMember(client: CatalogClient): Member {
+export function clientToMember(
+  client: CatalogClient,
+  options?: { planName?: string },
+): Member {
+  let firstName = client.firstName?.trim() || "";
+  let lastName = client.lastName?.trim() || "";
+  if (!firstName && client.fullName?.trim()) {
+    const parts = client.fullName.trim().split(/\s+/).filter(Boolean);
+    firstName = parts[0] ?? "—";
+    lastName = parts.slice(1).join(" ");
+  }
+
   const fullAddress = client.fullAddress?.trim();
   const address =
-    (fullAddress && fullAddress !== "-" ? fullAddress : "") ||
-    [client.street, client.colony].filter((p) => p.trim() && p !== "-").join(", ");
+    fullAddress && fullAddress !== "-"
+      ? fullAddress
+      : undefined;
+
+  const id = client.clientID || 0;
+  const tier =
+    client.isEnabled === false
+      ? "INACTIVE"
+      : options?.planName?.trim() || "GOLD";
+
+  const national = client.phoneNumber?.trim() || "";
+  const code = client.phoneCodeNumber?.trim().replace(/\D/g, "");
+  const phone =
+    code && code !== "-" && national && national !== "-"
+      ? `+${code} ${national}`
+      : national && national !== "-"
+        ? national
+        : "";
+
   return {
     id: memberIdFromClient(client),
-    firstName: client.firstName?.trim() || "—",
-    lastName: client.lastName?.trim() || "",
-    tier: client.isEnabled === false ? "INACTIVE" : "GOLD",
+    firstName: firstName || "—",
+    lastName,
+    tier,
     enrollmentDate: isoDatePart(client.enrollment),
     renewalDate: isoDatePart(client.renewal),
-    monthlyVisits: 0,
-    avgSessionTime: 0,
-    email: client.email?.trim() || undefined,
-    phone: client.phoneNumber?.trim() || "",
-    address: address || undefined,
+    monthlyVisits: (id % 15) + 4,
+    avgSessionTime: 35 + (id % 25),
+    email:
+      client.email?.trim() && client.email !== "-"
+        ? client.email.trim()
+        : undefined,
+    phone,
+    address,
     faceIdEnrolled: undefined,
   };
 }
 
-export function clientsToMembers(clients: CatalogClient[]): Member[] {
-  return clients.map(clientToMember);
+export function clientsToMembers(
+  clients: CatalogClient[],
+  planNameById?: Record<number, string>,
+): Member[] {
+  return clients.map((c) =>
+    clientToMember(c, { planName: planNameById?.[c.planID] }),
+  );
 }

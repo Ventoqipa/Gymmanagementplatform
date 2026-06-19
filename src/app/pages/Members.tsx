@@ -20,7 +20,9 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { addClientUseCase, listClientsUseCase } from "../core/catalog";
+import { addClientUseCase, listClientsUseCase, listPlansUseCase } from "../core/catalog";
+import type { PlanWithValidity } from "../core/catalog";
+import { renewalDateFromPlan } from "../lib/plansStore";
 import { useAuth } from "../context/AuthContext";
 import { addMembershipPayment, getPaymentsForMember } from "../lib/demoStore";
 import {
@@ -207,7 +209,7 @@ function renewalAfterMonths(enrollmentIso: string, months: number): string {
   return renewalAfterPeriod(enrollmentIso, { months });
 }
 
-const emptyNewMemberForm = () => {
+const emptyNewMemberForm = (defaultPlanId = 0, defaultRenewal = "") => {
   const today = new Date().toISOString().slice(0, 10);
   const enroll = today;
   return {
@@ -216,9 +218,9 @@ const emptyNewMemberForm = () => {
     email: "",
     phoneCountryDial: "52",
     phoneNational: "",
-    tier: "GOLD" as Member["tier"],
+    planID: defaultPlanId,
     enrollmentDate: enroll,
-    renewalDate: renewalAfterMonths(enroll, 6),
+    renewalDate: defaultRenewal || renewalAfterMonths(enroll, 6),
     enrollFaceId: true,
     faceIdTerminal: "TRN-MAIN-01",
     address: "",
@@ -233,7 +235,9 @@ export default function Members() {
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersFromApi, setMembersFromApi] = useState(false);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
-  const [newMemberForm, setNewMemberForm] = useState(emptyNewMemberForm);
+  const [newMemberForm, setNewMemberForm] = useState(emptyNewMemberForm());
+  const [membershipPlans, setMembershipPlans] = useState<PlanWithValidity[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterTier, setFilterTier] = useState<string>("ALL");
   const [currentPage, setCurrentPage] = useState(1);
@@ -499,9 +503,28 @@ export default function Members() {
     setPaymentsTick((t) => t + 1);
   };
 
-  const openAddMemberModal = () => {
-    setNewMemberForm(emptyNewMemberForm());
+  const openAddMemberModal = async () => {
+    setPlansLoading(true);
+    const plansResult = await listPlansUseCase();
+    setPlansLoading(false);
+    if (!plansResult.ok || plansResult.plans.length === 0) {
+      toast.error("Configure al menos un plan en la sección Planes antes de registrar miembros.");
+      return;
+    }
+    setMembershipPlans(plansResult.plans);
+    const first = plansResult.plans[0];
+    const enroll = new Date().toISOString().slice(0, 10);
+    setNewMemberForm(
+      emptyNewMemberForm(
+        first.planID,
+        renewalDateFromPlan(enroll, first.planID),
+      ),
+    );
     setShowAddMemberModal(true);
+  };
+
+  const applyPlanToRenewal = (planId: number, enrollmentIso: string) => {
+    return renewalDateFromPlan(enrollmentIso, planId);
   };
 
   const submitNewMember = async (e: React.FormEvent) => {
@@ -536,7 +559,8 @@ export default function Members() {
       return;
     }
 
-    const phoneTrim = `+${dial} ${national}`.replace(/\s+$/, "");
+    const phoneForApi = localDigits;
+    const phoneDisplay = `+${dial} ${national}`.replace(/\s+$/, "");
     if (emailNorm) {
       const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm);
       if (!emailOk) {
@@ -555,6 +579,11 @@ export default function Members() {
       toast.error("La renovación debe estar entre la fecha de alta y como máximo un año después.");
       return;
     }
+    if (!newMemberForm.planID || newMemberForm.planID <= 0) {
+      toast.error("Seleccione un plan de membresía.");
+      return;
+    }
+    const selectedPlan = membershipPlans.find((p) => p.planID === newMemberForm.planID);
     const addressTrim = newMemberForm.address.trim();
     setSavingNewMember(true);
 
@@ -563,13 +592,13 @@ export default function Members() {
         firstName,
         lastName,
         email: emailNorm || undefined,
-        phoneNumber: phoneTrim,
+        phoneNumber: phoneForApi,
+        phoneCodeNumber: dial,
         fullAddress: addressTrim || undefined,
+        planID: newMemberForm.planID,
         enrollmentDate: newMemberForm.enrollmentDate,
         renewalDate: newMemberForm.renewalDate,
-        photoFileName: newMemberForm.idDocumentDataUrl
-          ? `id-${Date.now()}.jpg`
-          : undefined,
+        idDocumentDataUrl: newMemberForm.idDocumentDataUrl,
       });
 
       if (!apiResult.ok) {
@@ -582,7 +611,8 @@ export default function Members() {
       let row = apiResult.member;
       row = {
         ...row,
-        tier: newMemberForm.tier,
+        phone: phoneDisplay,
+        tier: selectedPlan?.planName ?? apiResult.member.tier,
         ...(newMemberForm.idDocumentDataUrl
           ? { idDocumentDataUrl: newMemberForm.idDocumentDataUrl }
           : {}),
@@ -1477,22 +1507,32 @@ export default function Members() {
               <div className="flex min-w-0 flex-col gap-4 border-[rgba(93,63,60,0.08)] lg:gap-5 lg:border-l lg:pl-8 xl:pl-12">
               <div className="min-w-0">
                 <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                  Plan (tier)
+                  Plan de membresía
                 </label>
                 <select
-                  value={newMemberForm.tier}
-                  onChange={(e) =>
-                    setNewMemberForm({
-                      ...newMemberForm,
-                      tier: e.target.value,
-                    })
-                  }
-                  className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px]"
+                  value={newMemberForm.planID || ""}
+                  onChange={(e) => {
+                    const planID = Number(e.target.value);
+                    setNewMemberForm((f) => ({
+                      ...f,
+                      planID,
+                      renewalDate: applyPlanToRenewal(planID, f.enrollmentDate),
+                    }));
+                  }}
+                  disabled={plansLoading || membershipPlans.length === 0}
+                  className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px] disabled:opacity-50"
+                  required
                 >
-                  <option value="ELITE_BLK">ELITE_BLK</option>
-                  <option value="PLATINUM_ELITE">PLATINUM_ELITE</option>
-                  <option value="GOLD">GOLD</option>
-                  <option value="BASIC">BASIC</option>
+                  {membershipPlans.length === 0 ? (
+                    <option value="">Sin planes — cree uno en Planes</option>
+                  ) : (
+                    membershipPlans.map((p) => (
+                      <option key={p.planID} value={p.planID}>
+                        {p.planName} ({p.validityMonths}{" "}
+                        {p.validityMonths === 1 ? "mes" : "meses"})
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -1509,7 +1549,12 @@ export default function Members() {
                       setNewMemberForm((f) => ({
                         ...f,
                         enrollmentDate: ed,
-                        renewalDate: clampRenewalDate(ed, f.renewalDate),
+                        renewalDate: clampRenewalDate(
+                          ed,
+                          f.planID
+                            ? applyPlanToRenewal(f.planID, ed)
+                            : f.renewalDate,
+                        ),
                       }));
                     }}
                     className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-3 sm:px-4 focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px] [color-scheme:dark]"

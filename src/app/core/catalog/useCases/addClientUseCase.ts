@@ -28,6 +28,9 @@ export async function addClientUseCase(
   if (!input.phoneNumber.trim()) {
     return { ok: false, message: "El teléfono es obligatorio." };
   }
+  if (!input.planID || input.planID <= 0) {
+    return { ok: false, message: "Seleccione un plan de membresía." };
+  }
 
   try {
     const payload = buildClientPayload(input, {

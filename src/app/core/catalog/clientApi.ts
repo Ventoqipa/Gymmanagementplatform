@@ -1,32 +1,46 @@
 import { getSessionUserId } from "../auth/authStorage";
 import { catalogConfig, catalogUrl } from "../../config/catalog";
 import { catalogRequest } from "./catalogApiClient";
-import type { AddClientInput, CatalogClient, UpdateClientInput } from "./types";
+import { mapListItemsToCatalogClients } from "./mappers/clientListMapper";
+import {
+  buildPhotoClientIdFileName,
+  dataUrlToBase64,
+} from "./utils/clientPhoto";
+import type {
+  AddClientInput,
+  CatalogClient,
+  CatalogClientListData,
+  CatalogClientListItem,
+  UpdateClientInput,
+} from "./types";
 
 function toIsoDateTime(dateIso: string): string {
   return new Date(`${dateIso}T12:00:00`).toISOString();
 }
 
-function emptyStr(value?: string | null): string {
-  return value?.trim() ?? "";
-}
-
-function strOrDash(value?: string | null, maxLen?: number): string {
-  const result = emptyStr(value) || "-";
-  return maxLen ? result.slice(0, maxLen) : result;
+function dashStr(value?: string | null): string {
+  const v = value?.trim();
+  return v ? v : "-";
 }
 
 function buildFullName(firstName: string, lastName: string): string {
   return `${firstName.trim()} ${lastName.trim()}`.trim();
 }
 
+function nationalPhoneNumber(phoneNumber: string, phoneCodeNumber: string): string {
+  const code = phoneCodeNumber.trim().replace(/\D/g, "");
+  let digits = phoneNumber.trim().replace(/\D/g, "");
+  if (code && digits.startsWith(code)) {
+    digits = digits.slice(code.length);
+  }
+  return digits;
+}
+
 export type BuildClientScope = {
   companyId: number;
   branchId: number;
   clientId?: number;
-  /** Alta (POST) o edición (PUT). */
   mode?: "add" | "update";
-  /** Auditoría previa al actualizar. */
   existing?: Pick<
     CatalogClient,
     "userAdded" | "dateAdded" | "userEdited" | "dateEdited"
@@ -34,8 +48,8 @@ export type BuildClientScope = {
 };
 
 /**
- * Arma el JSON completo de Client para POST /Add y PUT /Update.
- * Los campos sin equivalente en el formulario se envían vacíos o con valor por defecto.
+ * JSON Client para POST /Add y PUT /Update.
+ * Solo valores del formulario; el resto "-" (string) o 0 (numérico requerido).
  */
 export function buildClientPayload(
   input: AddClientInput,
@@ -44,73 +58,109 @@ export function buildClientPayload(
   const isAdd = scope.mode !== "update";
   const clientId = scope.clientId ?? 0;
   const nowIso = new Date().toISOString();
-  const sessionUserId = getSessionUserId();
+  const sessionUserId = getSessionUserId() || "-";
 
   const firstName = input.firstName.trim().slice(0, 50);
   const lastName = input.lastName.trim().slice(0, 50);
-  const email = emptyStr(input.email);
-  const phone = input.phoneNumber.trim();
-  const street = emptyStr(input.street).slice(0, 250);
-  const colony = strOrDash(input.colony, 250);
-  const zip = emptyStr(input.zip);
-  const fullAddress = strOrDash(input.fullAddress ?? input.street, 250);
-  const photo =
-    emptyStr(input.photoFileName) || catalogConfig.defaults.photoPlaceholder;
+  const email = input.email?.trim();
+  const phoneCode = input.phoneCodeNumber.trim().replace(/\D/g, "").slice(0, 5);
+  const phone = nationalPhoneNumber(input.phoneNumber, phoneCode);
+  const fullName = buildFullName(firstName, lastName);
+  const fullAddress = dashStr(input.fullAddress);
 
   const dateAdded = isAdd ? nowIso : scope.existing?.dateAdded ?? nowIso;
-  const userAdded = sessionUserId;
-  const userEdited = sessionUserId;
+  const userAdded = isAdd ? sessionUserId : scope.existing?.userAdded ?? sessionUserId;
+
+  const hasPhoto = Boolean(input.idDocumentDataUrl?.trim());
+  const photoFileName = hasPhoto
+    ? buildPhotoClientIdFileName(fullName, input.enrollmentDate)
+    : "-";
+  const photoBase64 = hasPhoto
+    ? dataUrlToBase64(input.idDocumentDataUrl!)
+    : "-";
 
   return {
     isEnabled: true,
     isNew: isAdd,
     userAdded,
     dateAdded,
-    userEdited,
-    dateEdited: dateAdded,
+    userEdited: sessionUserId,
+    dateEdited: nowIso,
 
     clientID: clientId,
     companyID: scope.companyId,
     branchID: scope.branchId,
 
-    isPersonaFisica: true,
-    nombreDenominacionRazonSocial: "-",
-    fullName: buildFullName(firstName, lastName),
-
+    rfc: "-",
+    curp: "-",
+    fullName,
     firstName,
+    middleName: "-",
     lastName,
-    regimenCapitalID: 0,
-
-    email,
-    isEmailFavorite: false,
-    phoneNumber: phone,
-    isPhoneFavorite: true,
 
     countryID: catalogConfig.defaults.countryId,
     stateID: catalogConfig.defaults.stateId,
     municipalityID: catalogConfig.defaults.municipalityId,
 
-    street,
-    colony,
-    zip,
-    fullAddress,
+    email: dashStr(email),
+    phoneNumber: phone,
+    phoneCodeNumber: phoneCode || "-",
+
+    photoClientIDFileName: photoFileName,
+    photoClientIDBase64: photoBase64,
 
     statusID: catalogConfig.defaults.statusId,
+    fullAddress,
+
+    planID: input.planID,
     enrollment: toIsoDateTime(input.enrollmentDate),
     renewal: toIsoDateTime(input.renewalDate),
-
-    photoClientIdentificationFileName: photo,
   };
 }
 
-function normalizeClientList(data: unknown): CatalogClient[] {
-  if (Array.isArray(data)) return data as CatalogClient[];
+function isCatalogClient(value: unknown): value is CatalogClient {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "clientID" in value &&
+    "planID" in value
+  );
+}
+
+function normalizeClientList(
+  data: unknown,
+  scope: { companyId: number; branchId: number },
+): CatalogClient[] {
+  if (Array.isArray(data)) {
+    if (data.length > 0 && isCatalogClient(data[0])) {
+      return data as CatalogClient[];
+    }
+    return mapListItemsToCatalogClients(data as CatalogClientListItem[], scope);
+  }
+
   if (data && typeof data === "object") {
     const obj = data as Record<string, unknown>;
-    for (const key of ["items", "clients", "list", "data"]) {
-      if (Array.isArray(obj[key])) return obj[key] as CatalogClient[];
+    const genericList = obj.genericList ?? obj.GenericList;
+    if (Array.isArray(genericList)) {
+      return mapListItemsToCatalogClients(
+        genericList as CatalogClientListItem[],
+        scope,
+      );
+    }
+    for (const key of ["items", "clients", "list"]) {
+      if (Array.isArray(obj[key])) {
+        const arr = obj[key] as unknown[];
+        if (arr.length > 0 && isCatalogClient(arr[0])) {
+          return arr as CatalogClient[];
+        }
+        return mapListItemsToCatalogClients(arr as CatalogClientListItem[], scope);
+      }
+    }
+    if (isCatalogClient(data)) {
+      return [data];
     }
   }
+
   return [];
 }
 
@@ -118,11 +168,11 @@ export async function fetchClientsList(
   companyId: number,
   branchId: number,
 ): Promise<CatalogClient[]> {
-  const data = await catalogRequest<unknown>({
+  const data = await catalogRequest<CatalogClientListData | CatalogClient[] | unknown>({
     method: "GET",
     url: catalogUrl(catalogConfig.paths.listAll(companyId, branchId)),
   });
-  return normalizeClientList(data);
+  return normalizeClientList(data, { companyId, branchId });
 }
 
 export async function fetchClientById(clientId: number): Promise<CatalogClient> {

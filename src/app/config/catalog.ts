@@ -17,6 +17,11 @@ export const catalogConfig = {
     update: "/api/eg/Catalogs/Client/Update",
     delete: (clientId: number) =>
       `/api/eg/Catalogs/Client/Delete/${clientId}`,
+    planListAll: "/api/eg/Catalogs/Plan/ListAll",
+    planGetData: (planId: number) => `/api/eg/Catalogs/Plan/GetData/${planId}`,
+    planAdd: "/api/eg/Catalogs/Plan/Add",
+    planUpdate: "/api/eg/Catalogs/Plan/Update",
+    planDelete: (planId: number) => `/api/eg/Catalogs/Plan/Delete/${planId}`,
   },
   defaults: {
     countryId: Number(import.meta.env.VITE_CATALOG_DEFAULT_COUNTRY_ID ?? "1") || 1,

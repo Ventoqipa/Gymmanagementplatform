@@ -7,7 +7,8 @@ import {
   BarChart3,
   LogOut,
   Menu,
-  X
+  X,
+  CalendarDays
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -99,6 +100,21 @@ export default function Layout() {
           >
             <Users size={18} />
             <span className="font-bold text-xs tracking-wide uppercase">Miembros</span>
+          </NavLink>
+
+          <NavLink
+            to="/plans"
+            onClick={() => setMobileMenuOpen(false)}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-4 py-3 rounded transition-colors ${
+                isActive
+                  ? "bg-[#e31e24] text-white"
+                  : "text-[#808080] hover:bg-[#1a1a1a] hover:text-[#e5e2e1]"
+              }`
+            }
+          >
+            <CalendarDays size={18} />
+            <span className="font-bold text-xs tracking-wide uppercase">Planes</span>
           </NavLink>
 
           <NavLink

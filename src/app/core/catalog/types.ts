@@ -1,37 +1,43 @@
-/** Cliente del catálogo Tanosi — [Swagger Client](https://apicatalogsegtest.tanosi.com.mx/swagger/index.html) */
-
 export type CatalogClient = {
   isEnabled: boolean;
   isNew: boolean;
-  userAdded: string;
-  dateAdded: string;
-  userEdited: string;
-  dateEdited: string;
+  userAdded: string | null;
+  dateAdded: string | null;
+  userEdited: string | null;
+  dateEdited: string | null;
   clientID: number;
   companyID: number;
   branchID: number;
-  isPersonaFisica: boolean;
-  rfc: string;
-  nombreDenominacionRazonSocial: string;
-  fullName: string;
-  firstName: string;
-  lastName: string;
-  regimenCapitalID: number;
-  email: string;
-  isEmailFavorite: boolean;
-  phoneNumber: string;
-  isPhoneFavorite: boolean;
+  rfc: string | null;
+  curp: string | null;
+  fullName: string | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
   countryID: number;
   stateID: number;
   municipalityID: number;
-  street: string;
-  colony: string;
-  zip: string;
-  fullAddress: string;
+  email: string | null;
+  phoneNumber: string | null;
+  phoneCodeNumber: string | null;
+  photoClientIDFileName: string | null;
+  photoClientIDBase64: string | null;
   statusID: number;
+  fullAddress: string | null;
+  planID: number;
   enrollment: string;
-  renewal: string;
-  photoClientIdentificationFileName: string;
+  renewal: string | null;
+};
+
+export type CatalogPlan = {
+  isEnabled: boolean;
+  isNew: boolean;
+  userAdded: string | null;
+  dateAdded: string | null;
+  userEdited: string | null;
+  dateEdited: string | null;
+  planID: number;
+  planName: string;
 };
 
 export type CatalogApiResponse<T = unknown> = {
@@ -50,15 +56,57 @@ export type AddClientInput = {
   lastName: string;
   email?: string;
   phoneNumber: string;
-  street?: string;
-  colony?: string;
-  zip?: string;
+  phoneCodeNumber: string;
   fullAddress?: string;
+  planID: number;
   enrollmentDate: string;
   renewalDate: string;
-  photoFileName?: string;
+  idDocumentDataUrl?: string | null;
 };
 
 export type UpdateClientInput = AddClientInput & {
   clientID: number;
+};
+
+export type AddPlanInput = {
+  planName: string;
+  validityMonths: number;
+};
+
+export type UpdatePlanInput = AddPlanInput & {
+  planID: number;
+};
+
+/** Ítem resumido de GET Client/ListAll */
+export type CatalogClientListItem = {
+  ClientID?: number;
+  clientID?: number;
+  FullName?: string;
+  fullName?: string;
+  IsEnabled?: boolean;
+  isEnabled?: boolean;
+};
+
+export type CatalogClientListData = {
+  genericList?: CatalogClientListItem[];
+};
+
+export type CatalogPlanListItem = {
+  PlanID?: number;
+  planID?: number;
+  PlanName?: string;
+  planName?: string;
+  IsEnabled?: boolean;
+  isEnabled?: boolean;
+};
+
+export type CatalogPlanListData = {
+  plan?: CatalogPlanListItem[];
+  Plan?: CatalogPlanListItem[];
+  genericList?: CatalogPlanListItem[];
+};
+
+/** Plan con vigencia (meses) — metadata local complementaria al API */
+export type PlanWithValidity = CatalogPlan & {
+  validityMonths: number;
 };
