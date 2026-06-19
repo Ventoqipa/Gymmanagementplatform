@@ -31,7 +31,7 @@ export function parsePosApiError(httpStatus: number, body: unknown): string {
   return "Error al comunicarse con el POS.";
 }
 
-import { CORS_USER_MESSAGE, isLikelyCorsOrNetworkBlock } from "@/app/config/corsHint";
+import { CORS_USER_MESSAGE, isLikelyCorsOrNetworkBlock } from "./networkHint";
 
 export function parseNetworkError(error: unknown): string {
   if (isLikelyCorsOrNetworkBlock(error)) {

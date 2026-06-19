@@ -9,7 +9,7 @@ $allowedOrigin = 'https://elitegym247.tanosi.com.mx';
 
 header('Access-Control-Allow-Origin: ' . $allowedOrigin);
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Tenant-Id, X-Branch-Id');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Api-Key, X-Tenant-Id, X-Branch-Id, X-HTTP-Method-Override');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -25,7 +25,8 @@ if ($path === '' || $path[0] !== '/') {
 
 $targets = [
     'security' => 'https://apisecurityegtest.tanosi.com.mx',
-    'pos' => 'https://pos.elitegym247.tanosi.com.mx',
+    'pos' => 'https://elitegym247.pos.tanosi.com.mx',
+    'catalog' => 'https://apicatalogsegtest.tanosi.com.mx',
 ];
 
 if (!isset($targets[$backend])) {
@@ -59,6 +60,10 @@ $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
 if ($auth !== '') {
     $forwardHeaders[] = 'Authorization: ' . $auth;
 }
+$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
+if ($apiKey !== '') {
+    $forwardHeaders[] = 'X-Api-Key: ' . $apiKey;
+}
 $tenant = $_SERVER['HTTP_X_TENANT_ID'] ?? '';
 if ($tenant !== '') {
     $forwardHeaders[] = 'X-Tenant-Id: ' . $tenant;
@@ -68,6 +73,10 @@ if ($branch !== '') {
     $forwardHeaders[] = 'X-Branch-Id: ' . $branch;
 }
 $forwardHeaders[] = 'Accept: application/json';
+$methodOverride = $_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'] ?? '';
+if ($methodOverride !== '') {
+    $forwardHeaders[] = 'X-HTTP-Method-Override: ' . $methodOverride;
+}
 
 $ch = curl_init($url);
 curl_setopt_array($ch, [

@@ -9,23 +9,7 @@ import type {
   UpdateProductInput,
 } from "../domain/types";
 import type { PosRepository } from "../application/posRepository";
-import {
-  loadPosProducts,
-  loadPosSales,
-  savePosProducts,
-  savePosSales,
-} from "./localPosStorage";
-
-let products: PosProduct[] = loadPosProducts();
-let sales: PosSale[] = loadPosSales();
-
-function persistProducts() {
-  savePosProducts(products);
-}
-
-function persistSales() {
-  savePosSales(sales);
-}
+import type { LocalPosStorage } from "./localPosStorage";
 
 function filterProducts(
   list: PosProduct[],
@@ -48,7 +32,8 @@ function buildReceipt(
   input: CheckoutInput,
   ticketId: string,
 ): { receipt: PosTicketReceipt; sale: PosSale } {
-  const { subtotal, tax, total, ivaRate } = calcTotals(input.lines, input.ivaRegimen);
+  const regimen = input.ivaRegimen ?? "sin_iva";
+  const { subtotal, tax, total, ivaRate } = calcTotals(input.lines, regimen);
   const receipt: PosTicketReceipt = {
     id: ticketId,
     lines: input.lines.map((c) => ({
@@ -64,9 +49,9 @@ function buildReceipt(
     paymentMethod: input.paymentMethod,
     member: input.member,
     createdIso: new Date().toISOString(),
-    ivaRegimen: input.ivaRegimen,
+    ivaRegimen: regimen,
     ivaRate,
-    ivaLabelShort: IVA_REGIMEN_LABEL[input.ivaRegimen],
+    ivaLabelShort: IVA_REGIMEN_LABEL[regimen],
   };
 
   const sale: PosSale = {
@@ -79,7 +64,7 @@ function buildReceipt(
     linesSummary: receipt.lines.map((l) => `${l.qty}× ${l.name}`).join(" · "),
     memberId: input.member?.id,
     memberName: input.member?.name,
-    ivaRegimen: input.ivaRegimen,
+    ivaRegimen: regimen,
     ivaRate,
     lines: input.lines.map((c) => ({
       productId: c.id,
@@ -94,17 +79,32 @@ function buildReceipt(
 }
 
 export class MemoryPosRepository implements PosRepository {
+  private products: PosProduct[];
+  private sales: PosSale[];
+
+  constructor(private readonly storage: LocalPosStorage) {
+    this.products = storage.loadProducts();
+    this.sales = storage.loadSales();
+  }
+
+  private persistProducts() {
+    this.storage.saveProducts(this.products);
+  }
+
+  private persistSales() {
+    this.storage.saveSales(this.sales);
+  }
+
   async listProducts(params?: {
     search?: string;
     category?: string;
   }): Promise<PosProduct[]> {
-    return filterProducts([...products], params);
+    return filterProducts([...this.products], params);
   }
 
   async createProduct(input: CreateProductInput): Promise<PosProduct> {
     const id =
-      input.id?.trim() ||
-      generateProductSku(input.category, products);
+      input.id?.trim() || generateProductSku(input.category, this.products);
     const product: PosProduct = {
       id,
       name: input.name.trim().toUpperCase(),
@@ -112,13 +112,16 @@ export class MemoryPosRepository implements PosRepository {
       price: input.price,
       stock: input.stock,
     };
-    products = [...products, product];
-    persistProducts();
+    this.products = [...this.products, product];
+    this.persistProducts();
     return product;
   }
 
-  async updateProduct(id: string, input: UpdateProductInput): Promise<PosProduct> {
-    const idx = products.findIndex((p) => p.id === id);
+  async updateProduct(
+    id: string,
+    input: UpdateProductInput,
+  ): Promise<PosProduct> {
+    const idx = this.products.findIndex((p) => p.id === id);
     if (idx < 0) throw new Error("Producto no encontrado.");
     const updated: PosProduct = {
       id,
@@ -127,14 +130,14 @@ export class MemoryPosRepository implements PosRepository {
       price: input.price,
       stock: input.stock,
     };
-    products = products.map((p, i) => (i === idx ? updated : p));
-    persistProducts();
+    this.products = this.products.map((p, i) => (i === idx ? updated : p));
+    this.persistProducts();
     return updated;
   }
 
   async deleteProduct(id: string): Promise<void> {
-    products = products.filter((p) => p.id !== id);
-    persistProducts();
+    this.products = this.products.filter((p) => p.id !== id);
+    this.persistProducts();
   }
 
   async checkout(input: CheckoutInput): Promise<{
@@ -145,20 +148,23 @@ export class MemoryPosRepository implements PosRepository {
     const ticketId = `TKT-${Date.now().toString(36).toUpperCase()}`;
     const { receipt, sale } = buildReceipt(input, ticketId);
 
-    products = products.map((p) => {
+    this.products = this.products.map((p) => {
       const line = input.lines.find((c) => c.id === p.id);
       if (!line) return p;
       return { ...p, stock: Math.max(0, p.stock - line.quantity) };
     });
 
-    sales = [sale, ...sales];
-    persistProducts();
-    persistSales();
-    return { sale, receipt, products: [...products] };
+    this.sales = [sale, ...this.sales];
+    this.persistProducts();
+    this.persistSales();
+    return { sale, receipt, products: [...this.products] };
   }
 
-  async listSales(params?: { fromIso?: string; toIso?: string }): Promise<PosSale[]> {
-    let list = [...sales];
+  async listSales(params?: {
+    fromIso?: string;
+    toIso?: string;
+  }): Promise<PosSale[]> {
+    let list = [...this.sales];
     if (params?.fromIso) {
       const from = new Date(params.fromIso).getTime();
       list = list.filter((s) => new Date(s.dateIso).getTime() >= from);
@@ -179,5 +185,18 @@ export class MemoryPosRepository implements PosRepository {
   }
 }
 
-/** Instancia compartida para fallback y modo mock. */
-export const sharedMemoryPosRepository = new MemoryPosRepository();
+export function createMemoryPosRepository(
+  storage: LocalPosStorage,
+): MemoryPosRepository {
+  return new MemoryPosRepository(storage);
+}
+
+/** Instancia legacy compartida (mismas claves elite_gym_v1). */
+import { createLocalPosStorage } from "./localPosStorage";
+
+export const sharedMemoryPosRepository = createMemoryPosRepository(
+  createLocalPosStorage({
+    products: "elite_gym_v1_pos_products",
+    sales: "elite_gym_v1_pos_sales",
+  }),
+);

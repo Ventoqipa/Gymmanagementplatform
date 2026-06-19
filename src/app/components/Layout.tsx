@@ -48,7 +48,7 @@ export default function Layout() {
             />
             <div>
               <h1 className="font-bold text-sm tracking-tight uppercase">Elite Gym 24/7</h1>
-              <p className="text-[10px] text-[#e31e24] tracking-[1.5px] uppercase">Management System</p>
+              <p className="text-[10px] text-[#e31e24] tracking-[1.5px] uppercase">Sistema de gestión</p>
             </div>
           </div>
         </div>

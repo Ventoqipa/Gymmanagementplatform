@@ -23,7 +23,11 @@ interface AuthContextType {
   isAuthenticated: boolean;
   session: SignInSession | null;
   user: AuthenticatedUser | null;
-  login: (usuario: string, password: string) => Promise<LoginResult>;
+  login: (
+    usuario: string,
+    password: string,
+    rememberMe?: boolean,
+  ) => Promise<LoginResult>;
   logout: () => void;
 }
 
@@ -40,7 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(
-    async (usuario: string, password: string): Promise<LoginResult> => {
+    async (
+      usuario: string,
+      password: string,
+      rememberMe = false,
+    ): Promise<LoginResult> => {
       const result = await signInUseCase({
         hermesID: usuario,
         userPass: password,
@@ -50,8 +58,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: result.message };
       }
 
-      persistSession(result.session);
-      setSession(result.session);
+      const sessionWithUser: SignInSession = {
+        ...result.session,
+        authenticatedUser: {
+          ...result.session.authenticatedUser,
+          hermesID:
+            result.session.authenticatedUser?.hermesID?.trim() || usuario.trim(),
+        },
+      };
+
+      persistSession(sessionWithUser, { rememberMe });
+      setSession(sessionWithUser);
       return { success: true };
     },
     [],

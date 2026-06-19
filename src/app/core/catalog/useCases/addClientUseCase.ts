@@ -1,0 +1,50 @@
+import { getBranchId, getCompanyId } from "../../auth/authStorage";
+import { CatalogApiError } from "../catalogApiClient";
+import { buildClientPayload, postClientAdd } from "../clientApi";
+import { clientToMember } from "../mappers/clientMemberMapper";
+import type { AddClientInput } from "../types";
+import type { Member } from "../../../lib/membersStore";
+
+export type AddClientResult =
+  | { ok: true; member: Member }
+  | { ok: false; message: string; statusCode?: number };
+
+export async function addClientUseCase(
+  input: AddClientInput,
+): Promise<AddClientResult> {
+  const companyId = getCompanyId();
+  const branchId = getBranchId();
+
+  if (!companyId || !branchId) {
+    return {
+      ok: false,
+      message: "Sesión incompleta. Vuelva a iniciar sesión.",
+    };
+  }
+
+  if (!input.firstName.trim() || !input.lastName.trim()) {
+    return { ok: false, message: "Nombre y apellidos son obligatorios." };
+  }
+  if (!input.phoneNumber.trim()) {
+    return { ok: false, message: "El teléfono es obligatorio." };
+  }
+
+  try {
+    const payload = buildClientPayload(input, {
+      companyId,
+      branchId,
+      mode: "add",
+    });
+    const created = await postClientAdd(payload);
+    return { ok: true, member: clientToMember(created) };
+  } catch (error) {
+    if (error instanceof CatalogApiError) {
+      return { ok: false, message: error.message, statusCode: error.statusCode };
+    }
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "No se pudo registrar el cliente.",
+    };
+  }
+}

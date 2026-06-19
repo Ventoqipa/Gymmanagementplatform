@@ -21,6 +21,7 @@ export default function Login() {
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -36,7 +37,7 @@ export default function Login() {
 
     setIsSubmitting(true);
     try {
-      const result = await login(usuario.trim(), password);
+      const result = await login(usuario.trim(), password, rememberMe);
       if (result.success) {
         toast.success("Sesión iniciada correctamente.");
         navigate("/");
@@ -63,7 +64,7 @@ export default function Login() {
             Elite Gym 24/7
           </h1>
           <p className="text-[#e31e24] text-[10px] md:text-[12px] font-bold tracking-[2px] md:tracking-[3px] uppercase mt-2">
-            Management System
+            Sistema de gestión
           </p>
         </div>
 
@@ -71,7 +72,7 @@ export default function Login() {
           <div className="mb-6">
             
             <h2 className="text-[#e5e2e1] text-[24px] font-black tracking-[-1px] uppercase">
-              Authentication
+              Iniciar sesión
             </h2>
           </div>
 
@@ -90,7 +91,7 @@ export default function Login() {
                 htmlFor="usuario"
                 className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2"
               >
-                Usuario (Hermes ID)
+                Usuario
               </label>
               <div className="relative">
                 <User
@@ -152,12 +153,25 @@ export default function Login() {
               </div>
             </div>
 
+            <label className="flex items-center gap-3 cursor-pointer group">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                disabled={isSubmitting}
+                className="w-4 h-4 accent-[#e31e24] bg-[#0e0e0e] border border-[rgba(93,63,60,0.3)]"
+              />
+              <span className="text-[#808080] text-[11px] group-hover:text-[#e5e2e1] transition-colors">
+                Recuérdame
+              </span>
+            </label>
+
             <button
               type="submit"
               disabled={isSubmitting}
               className="w-full bg-[#e31e24] text-white py-3 font-['Space_Grotesk',sans-serif] font-bold text-[12px] tracking-[1.2px] uppercase hover:bg-[#c41a20] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {isSubmitting ? "Verificando…" : "Access System"}
+              {isSubmitting ? "Verificando…" : "Ingresar"}
             </button>
           </form>
 

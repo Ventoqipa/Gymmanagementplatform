@@ -36,7 +36,7 @@ export default function Dashboard() {
           Inicio
         </h1>
         <p className="text-[#808080] text-[11px] mt-2">
-          Métricas calculadas desde los datos guardados en este navegador.
+          Resumen de la operación del día.
         </p>
       </div>
 

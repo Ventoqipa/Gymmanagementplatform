@@ -22,7 +22,9 @@ export default defineConfig(({ mode }) => {
   const securityProxyTarget =
     env.VITE_SECURITY_API_PROXY_TARGET ?? 'https://apisecurityegtest.tanosi.com.mx'
   const posProxyTarget =
-    env.VITE_POS_API_PROXY_TARGET ?? 'https://pos.elitegym247.tanosi.com.mx'
+    env.VITE_POS_API_PROXY_TARGET ?? 'https://elitegym247.pos.tanosi.com.mx'
+  const catalogProxyTarget =
+    env.VITE_CATALOG_API_PROXY_TARGET ?? 'https://apicatalogsegtest.tanosi.com.mx'
 
   return {
     plugins: [
@@ -55,6 +57,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
           rewrite: (p) => p.replace(/^\/pos-api/, ''),
+        },
+        '/catalog-api': {
+          target: catalogProxyTarget,
+          changeOrigin: true,
+          secure: false,
+          rewrite: (p) => p.replace(/^\/catalog-api/, ''),
         },
       },
     },

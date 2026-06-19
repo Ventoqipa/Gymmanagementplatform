@@ -70,8 +70,7 @@ export default function Reports() {
             Reportes
           </h1>
           <p className="text-[#808080] text-[12px] mt-3 max-w-2xl">
-            Membresías, accesos y ventas de la tienda según el rango de fechas seleccionado. Los datos se guardan en
-            este navegador.
+            Membresías, accesos y ventas de la tienda según el rango de fechas seleccionado.
           </p>
         </div>
         <button

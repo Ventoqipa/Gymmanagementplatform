@@ -1,13 +1,14 @@
-import { loadPosSales } from "@/features/pos/infrastructure/localPosStorage";
-import type { PosSale } from "@/features/pos/domain/types";
+import {
+  getPosSalesInRange as queryPosSalesInRange,
+  loadPosSales,
+} from "@/features/pos";
+import type { PosSale } from "@/features/pos";
 import { getAccessLog, getMembershipPayments } from "./demoStore";
 import { ACTIVITY, isIsoInRange } from "./labels";
 import { getActiveMembersCount, loadMembers } from "./membersStore";
 
 export function getPosSalesInRange(fromDate: string, toDate: string): PosSale[] {
-  return loadPosSales()
-    .filter((s) => isIsoInRange(s.dateIso, fromDate, toDate))
-    .sort((a, b) => new Date(b.dateIso).getTime() - new Date(a.dateIso).getTime());
+  return queryPosSalesInRange(fromDate, toDate);
 }
 
 export function getPosSalesTodaySync(): PosSale[] {

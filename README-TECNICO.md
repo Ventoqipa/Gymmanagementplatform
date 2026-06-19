@@ -38,9 +38,28 @@ Inicio de sesión contra el API Tanosi (`POST /api/ge/Security/Access/SignIn`):
 
 - **Caso de uso:** `src/app/core/auth/signInUseCase.ts` (validación de usuario/contraseña, IP, `appID`, `typeAccess`).
 - **Cliente HTTP:** `src/app/core/auth/securityApiClient.ts` (errores Tanosi 409 y validación ASP.NET 400).
-- **Persistencia:** token y sesión en `localStorage` vía `authStorage.ts`.
+- **Persistencia:** token, sesión, `companyID` y `branchID` en `localStorage` (Recuérdame) o `sessionStorage` vía `authStorage.ts`.
 
 Variables opcionales (ver `.env.example`): `VITE_SECURITY_API_URL`, `VITE_APP_ID`, `VITE_TYPE_ACCESS`.
+
+## Catálogo Client (Miembros)
+
+Swagger: [apicatalogsegtest.tanosi.com.mx](https://apicatalogsegtest.tanosi.com.mx/swagger/index.html)
+
+| Método | Ruta |
+|--------|------|
+| GET | `/api/eg/Catalogs/Client/ListAll/{CompanyID}/{BranchID}` |
+| GET | `/api/eg/Catalogs/Client/GetData/{ClientID}` |
+| POST | `/api/eg/Catalogs/Client/Add` |
+| PUT | `/api/eg/Catalogs/Client/Update` |
+| DELETE | `/api/eg/Catalogs/Client/Delete/{ClientID}` |
+
+- **Use cases:** `src/app/core/catalog/useCases/`
+- **Bearer:** todas las llamadas envían `Authorization: Bearer {token}` del SignIn.
+- **Proxy dev:** `/catalog-api` → `apicatalogsegtest.tanosi.com.mx` (`vite.config.ts`).
+- **Producción:** `/catalog-api` vía `api-proxy.php` + `web.config`.
+
+Variable: `VITE_CATALOG_API_URL=/catalog-api` en `.env.production`.
 
 ### CORS (Postman funciona, el navegador no)
 
@@ -48,8 +67,8 @@ Los navegadores bloquean peticiones a otro dominio si el API no envía cabeceras
 
 | Entorno | Qué hacer |
 |---------|-----------|
-| **Desarrollo** | `npm run dev` y **no** definir URLs absolutas en `.env`. El front llama a `/security-api` y `/pos-api`; Vite las reenvía al API real (`vite.config.ts`). Si el proxy devuelve **500** y en consola aparece `ERR_TLS_CERT_ALTNAME_INVALID`, el SSL de Neubox no coincide con el subdominio; el proxy usa `secure: false` solo en dev. En Neubox conviene instalar el certificado para el subdominio real. |
-| **Producción** | **Proxy temporal (activo):** `npm run build` + `dist/web.config` reenvía `/security-api` y `/pos-api` al API real en el servidor (mismo dominio del gym → sin CORS ni alerta SSL en el navegador). Ver abajo. |
+| **Desarrollo** | `npm run dev` y **no** definir URLs absolutas en `.env`. El front llama a `/security-api`, `/catalog-api` y `/pos-api`; Vite las reenvía al API real (`vite.config.ts`). Si el proxy devuelve **500** y en consola aparece `ERR_TLS_CERT_ALTNAME_INVALID`, el SSL de Neubox no coincide con el subdominio; el proxy usa `secure: false` solo en dev. En Neubox conviene instalar el certificado para el subdominio real. |
+| **Producción** | **Proxy temporal (activo):** `npm run build` + `dist/web.config` reenvía `/security-api`, `/catalog-api` y `/pos-api` al API real en el servidor (mismo dominio del gym → sin CORS ni alerta SSL en el navegador). Ver abajo. |
 
 ### Proxy temporal IIS (Neubox) — producción
 

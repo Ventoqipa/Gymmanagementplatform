@@ -20,6 +20,8 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { addClientUseCase, listClientsUseCase } from "../core/catalog";
+import { useAuth } from "../context/AuthContext";
 import { addMembershipPayment, getPaymentsForMember } from "../lib/demoStore";
 import {
   loadMembers,
@@ -168,14 +170,6 @@ function MemberExpiryIndicator({
 
 const ITEMS_PER_PAGE = 8;
 
-function nextMemberId(list: Member[]): string {
-  const nums = list
-    .map((m) => parseInt(m.id.replace(/^MEM-/, ""), 10))
-    .filter((n) => !Number.isNaN(n));
-  const n = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-  return `MEM-${n}`;
-}
-
 function addMonthsIso(dateStr: string, months: number): string {
   const d = new Date(dateStr + "T12:00:00");
   d.setMonth(d.getMonth() + months);
@@ -234,7 +228,10 @@ const emptyNewMemberForm = () => {
 
 export default function Members() {
   const navigate = useNavigate();
-  const [members, setMembers] = useState<Member[]>(() => loadMembers());
+  const { isAuthenticated } = useAuth();
+  const [members, setMembers] = useState<Member[]>([]);
+  const [membersLoading, setMembersLoading] = useState(true);
+  const [membersFromApi, setMembersFromApi] = useState(false);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [newMemberForm, setNewMemberForm] = useState(emptyNewMemberForm);
   const [searchTerm, setSearchTerm] = useState("");
@@ -249,9 +246,46 @@ export default function Members() {
   });
   const [paymentsTick, setPaymentsTick] = useState(0);
 
+  const refreshMembersFromApi = async () => {
+    if (!isAuthenticated) {
+      setMembers(loadMembers());
+      setMembersFromApi(false);
+      setMembersLoading(false);
+      return;
+    }
+
+    setMembersLoading(true);
+    const result = await listClientsUseCase();
+    if (result.ok) {
+      setMembers(result.members);
+      saveMembers(result.members);
+      setMembersFromApi(true);
+    } else {
+      const cached = loadMembers();
+      setMembers(cached);
+      setMembersFromApi(false);
+      if (cached.length === 0) {
+        toast.error("No se pudo cargar la lista de miembros", {
+          description: result.message,
+        });
+      } else {
+        toast.warning("Sin conexión; mostrando datos guardados", {
+          description: result.message,
+        });
+      }
+    }
+    setMembersLoading(false);
+  };
+
   useEffect(() => {
-    saveMembers(members);
-  }, [members]);
+    void refreshMembersFromApi();
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!membersFromApi) {
+      saveMembers(members);
+    }
+  }, [members, membersFromApi]);
   const [savingNewMember, setSavingNewMember] = useState(false);
   const [phonePrefixMenuOpen, setPhonePrefixMenuOpen] = useState(false);
   const phonePrefixRef = useRef<HTMLDivElement>(null);
@@ -521,61 +555,79 @@ export default function Members() {
       toast.error("La renovación debe estar entre la fecha de alta y como máximo un año después.");
       return;
     }
-    const visits = 0;
-    const avgMin = 0;
-    const id = nextMemberId(members);
-
-    let faceIdTemplateId: string | undefined;
-    let faceIdEnrolled = false;
-
-    if (newMemberForm.enrollFaceId) {
-      setSavingNewMember(true);
-      try {
-        const res = await mockFaceIdEnroll({
-          terminalId: newMemberForm.faceIdTerminal,
-          memberId: id,
-          displayName: fullName,
-        });
-        faceIdTemplateId = res.templateId;
-        faceIdEnrolled = true;
-      } catch {
-        toast.warning("No se vinculó el rostro", {
-          description: "Complete el alta FaceID desde Access Control cuando el lector esté disponible.",
-        });
-      } finally {
-        setSavingNewMember(false);
-      }
-    }
-
     const addressTrim = newMemberForm.address.trim();
-    const row: Member = {
-      id,
-      firstName,
-      lastName,
-      phone: phoneTrim,
-      tier: newMemberForm.tier,
-      enrollmentDate: newMemberForm.enrollmentDate,
-      renewalDate: newMemberForm.renewalDate,
-      monthlyVisits: visits,
-      avgSessionTime: avgMin,
-      faceIdEnrolled,
-      faceIdTemplateId,
-      ...(emailNorm ? { email: emailNorm } : {}),
-      ...(addressTrim ? { address: addressTrim } : {}),
-      ...(newMemberForm.idDocumentDataUrl ? { idDocumentDataUrl: newMemberForm.idDocumentDataUrl } : {}),
-    };
-    setMembers((prev) => [row, ...prev]);
-    setShowAddMemberModal(false);
-    setExpandedMember(id);
-    setCurrentPage(1);
-    setSearchTerm("");
-    setFilterTier("ALL");
-    toast.success("Miembro registrado", {
-      description:
-        newMemberForm.enrollFaceId && faceIdEnrolled
-          ? `${fullName} · ${id} · Rostro registrado`
-          : `${fullName} · ${id}`,
-    });
+    setSavingNewMember(true);
+
+    try {
+      const apiResult = await addClientUseCase({
+        firstName,
+        lastName,
+        email: emailNorm || undefined,
+        phoneNumber: phoneTrim,
+        fullAddress: addressTrim || undefined,
+        enrollmentDate: newMemberForm.enrollmentDate,
+        renewalDate: newMemberForm.renewalDate,
+        photoFileName: newMemberForm.idDocumentDataUrl
+          ? `id-${Date.now()}.jpg`
+          : undefined,
+      });
+
+      if (!apiResult.ok) {
+        toast.error("No se pudo registrar el miembro", {
+          description: apiResult.message,
+        });
+        return;
+      }
+
+      let row = apiResult.member;
+      row = {
+        ...row,
+        tier: newMemberForm.tier,
+        ...(newMemberForm.idDocumentDataUrl
+          ? { idDocumentDataUrl: newMemberForm.idDocumentDataUrl }
+          : {}),
+      };
+
+      if (newMemberForm.enrollFaceId) {
+        try {
+          const res = await mockFaceIdEnroll({
+            terminalId: newMemberForm.faceIdTerminal,
+            memberId: row.id,
+            displayName: fullName,
+          });
+          row = {
+            ...row,
+            faceIdTemplateId: res.templateId,
+            faceIdEnrolled: true,
+          };
+        } catch {
+          toast.warning("No se vinculó el rostro", {
+            description:
+              "Complete el alta FaceID desde Control de acceso cuando el lector esté disponible.",
+          });
+        }
+      }
+
+      setMembers((prev) => {
+        const next = [row, ...prev];
+        saveMembers(next);
+        return next;
+      });
+      setMembersFromApi(true);
+      setShowAddMemberModal(false);
+      setExpandedMember(row.id);
+      setCurrentPage(1);
+      setSearchTerm("");
+      setFilterTier("ALL");
+      toast.success("Miembro registrado", {
+        description:
+          newMemberForm.enrollFaceId && row.faceIdEnrolled
+            ? `${fullName} · ${row.id} · Rostro registrado`
+            : `${fullName} · ${row.id}`,
+      });
+    } finally {
+      setSavingNewMember(false);
+    }
   };
 
   return (
@@ -593,7 +645,15 @@ export default function Members() {
           <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
             Directorio de miembros
           </p>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            <button
+              type="button"
+              onClick={() => void refreshMembersFromApi()}
+              disabled={membersLoading}
+              className="text-[#808080] hover:text-[#e5e2e1] text-[10px] font-bold uppercase tracking-wide disabled:opacity-50"
+            >
+              Actualizar
+            </button>
             <span className="text-[#808080] text-[10px]">
               Mostrando {startIndex + 1}-{Math.min(endIndex, filteredMembers.length)} de {filteredMembers.length}
             </span>
@@ -691,9 +751,14 @@ export default function Members() {
           </div>
 
           {/* Table Rows */}
-          {currentMembers.length === 0 ? (
+          {membersLoading ? (
+            <div className="py-12 text-center flex flex-col items-center gap-3">
+              <Loader2 className="animate-spin text-[#e31e24]" size={28} />
+              <p className="text-[#808080] text-[14px]">Cargando miembros…</p>
+            </div>
+          ) : currentMembers.length === 0 ? (
             <div className="py-12 text-center">
-              <p className="text-[#808080] text-[14px]">No members found</p>
+              <p className="text-[#808080] text-[14px]">No se encontraron miembros</p>
             </div>
           ) : (
             currentMembers.map((member) => (
@@ -1203,10 +1268,7 @@ export default function Members() {
                   Alta en directorio
                 </h3>
                 <p className="text-[#808080] text-[11px] mt-2 leading-relaxed break-words">
-                  ID asignado: <span className="text-[#e5e2e1] font-mono font-bold">{nextMemberId(members)}</span>
-                  <span className="block text-[#5a5a5a] text-[10px] mt-1.5">
-                    Comunicación principal por <span className="text-[#e5e2e1] font-semibold">WhatsApp</span> (teléfono obligatorio).
-                  </span>
+                  Comunicación principal por <span className="text-[#e5e2e1] font-semibold">WhatsApp</span> (teléfono obligatorio).
                 </p>
               </div>
               <button
