@@ -7,8 +7,11 @@ import type {
   PosProduct,
   PosSale,
   PosTicketReceipt,
+  PosTransactionType,
+  SubscriptionCheckoutInput,
   UpdateProductInput,
 } from "../domain/types";
+import { filterSalesByType, normalizePosSale, resolveTransactionType } from "../domain/filterSales";
 import type { PosRepository } from "../application/posRepository";
 
 type CheckoutApiResponse = {
@@ -85,24 +88,51 @@ export class RestPosRepository implements PosRepository {
       result.products ?? (await this.listProducts());
 
     return {
-      sale: result.sale,
+      sale: normalizePosSale(result.sale),
       receipt: result.receipt,
       products,
     };
   }
 
+  async checkoutSubscription(
+    input: SubscriptionCheckoutInput,
+  ): Promise<{ sale: PosSale }> {
+    const result = await posPost<{ sale: PosSale }>(
+      this.config,
+      POS_API_PATHS.salesSubscription,
+      {
+        memberId: input.memberId,
+        memberName: input.memberName,
+        amount: input.amount,
+        paymentMethod: input.paymentMethod,
+        concept: input.concept ?? "MEMBERSHIP",
+        periodKey: input.periodKey,
+        payerId: input.payerId,
+        payerName: input.payerName,
+      },
+    );
+    return { sale: normalizePosSale(result.sale) };
+  }
+
   async listSales(params?: {
-    fromIso?: string;
-    toIso?: string;
+    from?: string;
+    to?: string;
+    type?: PosTransactionType;
   }): Promise<PosSale[]> {
     const query: Record<string, string> = {};
-    if (params?.fromIso) query.from = params.fromIso;
-    if (params?.toIso) query.to = params.toIso;
-    return posGet<PosSale[]>(this.config, POS_API_PATHS.sales, query);
+    if (params?.from) query.from = params.from;
+    if (params?.to) query.to = params.to;
+    if (params?.type) query.type = params.type;
+    const rows = await posGet<PosSale[]>(this.config, POS_API_PATHS.sales, query);
+    return rows.map(normalizePosSale).filter((sale) => {
+      if (!params?.type) return true;
+      return resolveTransactionType(sale) === params.type;
+    });
   }
 
   async listSalesToday(): Promise<PosSale[]> {
-    return posGet<PosSale[]>(this.config, POS_API_PATHS.salesToday);
+    const rows = await posGet<PosSale[]>(this.config, POS_API_PATHS.salesToday);
+    return rows.map(normalizePosSale);
   }
 
   healthCheck(): Promise<void> {

@@ -27,6 +27,8 @@ import {
 } from "../lib/plansStore";
 import { useAuth } from "../context/AuthContext";
 import { addMembershipPayment, getPaymentsForMember } from "../lib/demoStore";
+import { getGymPosService } from "../config/gymPosService";
+import type { SubscriptionConcept } from "@/features/pos";
 import {
   loadMembers,
   saveMembers,
@@ -652,17 +654,53 @@ export default function Members() {
     setPaymentForm((f) => ({ ...f, amount: "89.99" }));
   };
 
-  const submitPayment = (e: React.FormEvent) => {
+  const registerSubscriptionPayment = async (opts: {
+    memberId: string;
+    memberName: string;
+    amount: number;
+    method: "CASH" | "CARD" | "QR";
+    concept: SubscriptionConcept;
+    periodKey?: string | null;
+  }) => {
+    try {
+      await getGymPosService().checkoutSubscription({
+        memberId: opts.memberId,
+        memberName: opts.memberName,
+        amount: opts.amount,
+        paymentMethod: opts.method,
+        concept: opts.concept,
+        periodKey: opts.periodKey ?? undefined,
+      });
+    } catch (error) {
+      addMembershipPayment({
+        memberId: opts.memberId,
+        amount: opts.amount,
+        concept: opts.concept,
+        method: opts.method,
+      });
+      throw error;
+    }
+  };
+
+  const submitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!paymentModalMember) return;
     const amount = parseFloat(paymentForm.amount);
     if (Number.isNaN(amount) || amount <= 0) return;
-    addMembershipPayment({
-      memberId: paymentModalMember.id,
-      amount,
-      concept: paymentForm.concept,
-      method: paymentForm.method,
-    });
+    try {
+      await registerSubscriptionPayment({
+        memberId: paymentModalMember.id,
+        memberName: memberFullName(paymentModalMember),
+        amount,
+        concept: paymentForm.concept,
+        method: paymentForm.method,
+      });
+      toast.success("Pago de suscripción registrado");
+    } catch {
+      toast.warning("Pago guardado localmente", {
+        description: "No se pudo sincronizar con el POS API; quedó en almacén local.",
+      });
+    }
     setPaymentModalMember(null);
     setPaymentsTick((t) => t + 1);
   };
@@ -788,12 +826,20 @@ export default function Members() {
         return next;
       });
       if (newMemberForm.payNow) {
-        addMembershipPayment({
-          memberId: row.id,
-          amount: paymentAmount,
-          concept: "MEMBERSHIP",
-          method: newMemberForm.paymentMethod,
-        });
+        try {
+          await registerSubscriptionPayment({
+            memberId: row.id,
+            memberName: fullName,
+            amount: paymentAmount,
+            concept: "MEMBERSHIP",
+            method: newMemberForm.paymentMethod,
+            periodKey: newMemberForm.selectedPeriodKey,
+          });
+        } catch {
+          toast.warning("Miembro registrado; pago solo en almacén local", {
+            description: "No se pudo registrar el cobro en el POS API.",
+          });
+        }
         setPaymentsTick((t) => t + 1);
       }
       setMembersFromApi(true);
@@ -816,9 +862,9 @@ export default function Members() {
   };
 
   return (
-    <div className="h-full bg-[#131313] p-4 md:p-8">
-      <div className="mb-6 md:mb-8">
-        <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
+    <div className="h-full bg-[#131313] p-4 md:p-6">
+      <div className="mb-3 md:mb-4">
+        <h1 className="text-[#e5e2e1] text-[22px] md:text-[30px] font-black tracking-[-0.5px] uppercase leading-tight">
           Miembros
         </h1>
       </div>
@@ -1125,7 +1171,7 @@ export default function Members() {
                         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] mb-2">
                           SUSCRIPCIÓN
                         </p>
-                        <h2 className="text-white text-[26px] sm:text-[30px] font-black mb-1 leading-tight">
+                        <h2 className="text-white text-[15px] sm:text-[17px] font-bold mb-1 leading-tight">
                           {getExpiryMeta(member.renewalDate).label}
                         </h2>
                         <p className="text-[#e7bdb8] text-[12px] mb-5">
@@ -1209,11 +1255,11 @@ export default function Members() {
                         <div className="space-y-4">
                           <div>
                             <p className="text-[#808080] text-[10px] mb-1">MONTHLY VISITS</p>
-                            <p className="text-[#e5e2e1] text-[24px] font-black">{member.monthlyVisits}</p>
+                            <p className="text-[#e5e2e1] text-[16px] font-black">{member.monthlyVisits}</p>
                           </div>
                           <div>
                             <p className="text-[#808080] text-[10px] mb-1">AVG SESSION TIME</p>
-                            <p className="text-[#e5e2e1] text-[24px] font-black">{member.avgSessionTime} MIN</p>
+                            <p className="text-[#e5e2e1] text-[16px] font-black">{member.avgSessionTime} MIN</p>
                           </div>
                           <div>
                             <p className="text-[#808080] text-[10px] mb-1">MEMBER SINCE</p>
@@ -1374,7 +1420,7 @@ export default function Members() {
                 <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">
                   Registro de pago
                 </p>
-                <h3 className="text-[#e5e2e1] text-[20px] font-black uppercase leading-tight">
+                <h3 className="text-[#e5e2e1] text-[16px] font-black uppercase leading-tight">
                   {memberFullName(paymentModalMember)}
                 </h3>
                 <p className="text-[#808080] text-[11px] font-mono mt-1">{paymentModalMember.id}</p>

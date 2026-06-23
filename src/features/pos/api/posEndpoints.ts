@@ -8,6 +8,7 @@ export const POS_API_PATHS = {
   productDelete: (id: string) =>
     `/products/${encodeURIComponent(id)}/delete`,
   salesCheckout: "/sales/checkout",
+  salesSubscription: "/sales/subscription",
   sales: "/sales",
   salesToday: "/sales/today",
 } as const;

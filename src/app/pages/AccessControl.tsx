@@ -165,12 +165,12 @@ export default function AccessControl() {
     new Date(iso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" });
 
   return (
-    <div className="h-full bg-[#131313] p-4 md:p-8 overflow-auto">
-      <div className="mb-6 md:mb-8">
-        <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
+    <div className="h-full bg-[#131313] p-4 md:p-6 overflow-auto">
+      <div className="mb-3 md:mb-4">
+        <h1 className="text-[#e5e2e1] text-[22px] md:text-[30px] font-black tracking-[-0.5px] uppercase leading-tight">
           Control de acceso
         </h1>
-        <p className="text-[#808080] text-[12px] mt-3 max-w-3xl leading-relaxed">
+        <p className="text-[#808080] text-[11px] mt-1 max-w-3xl leading-relaxed">
           Control de accesos por reconocimiento facial y sincronización con torniquetes en tiempo real.
         </p>
       </div>
@@ -186,7 +186,7 @@ export default function AccessControl() {
             </div>
             <span className="text-[9px] uppercase tracking-wider text-[#00ff00] font-bold">En línea</span>
           </div>
-          <p className="text-[#e5e2e1] text-[28px] font-black mb-2">Lector listo</p>
+          <p className="text-[#e5e2e1] text-[20px] font-black mb-2">Lector listo</p>
           <p className="text-[#808080] text-[11px] mb-4">
             Inicie una lectura en el terminal seleccionado. Los eventos quedan registrados y el torniquete actúa según el
             resultado.
@@ -271,7 +271,7 @@ export default function AccessControl() {
               Visitas hoy
             </p>
           </div>
-          <p className="text-[#e5e2e1] text-[36px] font-black mb-4">{todayStats.total}</p>
+          <p className="text-[#e5e2e1] text-[26px] font-black mb-3">{todayStats.total}</p>
           <div className="space-y-2 text-[10px]">
             <div className="flex justify-between items-center">
               <span className="text-[#808080] flex items-center gap-1">
@@ -301,7 +301,7 @@ export default function AccessControl() {
               Alta biométrica
             </p>
           </div>
-          <h2 className="text-[#e5e2e1] text-[20px] md:text-[24px] font-black uppercase tracking-tight mb-2">
+          <h2 className="text-[#e5e2e1] text-[16px] md:text-[18px] font-bold uppercase tracking-tight mb-2">
             Nuevo rostro FaceID
           </h2>
           <p className="text-[#808080] text-[11px] mb-6 leading-relaxed">

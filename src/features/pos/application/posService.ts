@@ -7,6 +7,8 @@ import type {
   PosProduct,
   PosSale,
   PosTicketReceipt,
+  PosTransactionType,
+  SubscriptionCheckoutInput,
   UpdateProductInput,
 } from "../domain/types";
 
@@ -48,11 +50,15 @@ export class PosService {
     return this.repository.checkout(input);
   }
 
-  listSales(params?: { fromIso?: string; toIso?: string }) {
+  listSales(params?: { from?: string; to?: string; type?: PosTransactionType }) {
     return this.repository.listSales(params);
   }
 
   listSalesToday() {
     return this.repository.listSalesToday();
+  }
+
+  checkoutSubscription(input: SubscriptionCheckoutInput) {
+    return this.repository.checkoutSubscription(input);
   }
 }

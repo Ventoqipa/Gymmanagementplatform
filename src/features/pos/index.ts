@@ -19,6 +19,10 @@ export type {
   PosProduct,
   PosSale,
   PosTicketReceipt,
+  PosTransactionType,
+  PosReportBucket,
+  SubscriptionCheckoutInput,
+  SubscriptionConcept,
   CartLine,
   LinkedCustomer,
   CreateProductInput,
@@ -49,5 +53,6 @@ export {
   getPosSalesInRange,
 } from "./infrastructure/localPosStorage";
 
-export { generateProductSku } from "./domain/productId";
+export { filterSalesByType, normalizePosSale, resolveTransactionType } from "./domain/filterSales";
+export { summarizePosSales } from "./domain/summarizeSales";
 export { posConfig, getPosApiUrl } from "./config";

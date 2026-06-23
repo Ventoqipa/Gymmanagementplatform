@@ -134,15 +134,17 @@ export function computeTopProducts(
   limit = 5,
   fromDate?: string,
   toDate?: string,
+  salesSource?: PosSale[],
 ): {
   name: string;
   sales: number;
   units: number;
 }[] {
   const sales =
-    fromDate && toDate
+    salesSource ??
+    (fromDate && toDate
       ? getPosSalesInRange(fromDate, toDate)
-      : loadPosSales();
+      : loadPosSales());
   const map = new Map<string, { name: string; sales: number; units: number }>();
   for (const sale of sales) {
     for (const line of sale.lines ?? []) {

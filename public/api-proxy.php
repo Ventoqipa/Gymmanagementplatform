@@ -1,7 +1,7 @@
 <?php
 /**
  * Proxy temporal mismo origen (Neubox / IIS sin ARR).
- * Reenvía /security-api/* y /pos-api/* al API real vía servidor (sin CORS ni SSL en el navegador).
+ * Reenvía /security-api/*, /pos-api/* y /catalog-api/* al API real vía servidor (sin CORS ni SSL en el navegador).
  */
 declare(strict_types=1);
 

@@ -1,4 +1,5 @@
 import { calcTotals, IVA_REGIMEN_LABEL } from "../domain/tax";
+import { filterSalesByType } from "../domain/filterSales";
 import { generateProductSku } from "../domain/productId";
 import type {
   CheckoutInput,
@@ -6,6 +7,8 @@ import type {
   PosProduct,
   PosSale,
   PosTicketReceipt,
+  PosTransactionType,
+  SubscriptionCheckoutInput,
   UpdateProductInput,
 } from "../domain/types";
 import type { PosRepository } from "../application/posRepository";
@@ -56,6 +59,7 @@ function buildReceipt(
 
   const sale: PosSale = {
     id: ticketId.replace("TKT-", "POS-"),
+    transactionType: "product",
     total,
     subtotal,
     tax,
@@ -160,17 +164,55 @@ export class MemoryPosRepository implements PosRepository {
     return { sale, receipt, products: [...this.products] };
   }
 
+  async checkoutSubscription(
+    input: SubscriptionCheckoutInput,
+  ): Promise<{ sale: PosSale }> {
+    const ticketId = `TKT-${Date.now().toString(36).toUpperCase()}`;
+    const concept = input.concept ?? "MEMBERSHIP";
+    const periodSuffix = input.periodKey ? ` · ${input.periodKey}` : "";
+    const linesSummary = `Suscripción · ${concept}${periodSuffix}${
+      input.memberName ? ` · ${input.memberName}` : ""
+    }`;
+    const dateIso = new Date().toISOString();
+    const sale: PosSale = {
+      id: ticketId.replace("TKT-", "POS-"),
+      transactionType: "subscription",
+      total: input.amount,
+      subtotal: input.amount,
+      tax: 0,
+      method: input.paymentMethod,
+      dateIso,
+      linesSummary,
+      memberId: input.memberId,
+      memberName: input.memberName,
+      payerId: input.payerId,
+      payerName: input.payerName,
+      ivaRegimen: "sin_iva",
+      ivaRate: 0,
+      subscriptionConcept: concept,
+      periodKey: input.periodKey,
+      lines: [],
+    };
+    this.sales = [sale, ...this.sales];
+    this.persistSales();
+    return { sale };
+  }
+
   async listSales(params?: {
-    fromIso?: string;
-    toIso?: string;
+    from?: string;
+    to?: string;
+    type?: PosTransactionType;
   }): Promise<PosSale[]> {
     let list = [...this.sales];
-    if (params?.fromIso) {
-      const from = new Date(params.fromIso).getTime();
+    if (params?.type) {
+      list = filterSalesByType(list, params.type);
+    }
+    if (params?.from) {
+      const from = new Date(`${params.from}T00:00:00`).getTime();
       list = list.filter((s) => new Date(s.dateIso).getTime() >= from);
     }
-    if (params?.toIso) {
-      const to = new Date(params.toIso).getTime();
+    if (params?.to) {
+      const to = new Date(`${params.to}T23:59:59.999`).getTime();
       list = list.filter((s) => new Date(s.dateIso).getTime() <= to);
     }
     return list.sort(
@@ -181,7 +223,7 @@ export class MemoryPosRepository implements PosRepository {
   async listSalesToday(): Promise<PosSale[]> {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
-    return this.listSales({ fromIso: start.toISOString() });
+    return this.listSales({ from: start.toISOString().slice(0, 10) });
   }
 }
 

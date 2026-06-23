@@ -7,6 +7,7 @@ import {
   Plus,
   QrCode,
   Search,
+  ShoppingCart,
   Trash2,
   User,
   X,
@@ -19,15 +20,92 @@ const PAYMENT_ICONS = {
   QR: QrCode,
 } as const;
 
+type CheckoutDockProps = {
+  pos: ReturnType<typeof usePosTerminal>;
+  labels: ReturnType<typeof usePosTerminal>["labels"];
+  canCheckout: boolean;
+  className?: string;
+};
+
+function CheckoutDock({ pos, labels, canCheckout, className = "" }: CheckoutDockProps) {
+  return (
+    <div
+      className={`bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] p-3 sm:p-4 space-y-3 shadow-[0_-8px_32px_rgba(0,0,0,0.45)] ${className}`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[#808080] text-[9px] font-bold uppercase tracking-wide">
+            {labels.paymentMethod}
+          </p>
+          <p className="text-[#e5e2e1] text-[11px] mt-0.5">
+            {pos.cart.length} {pos.cart.length === 1 ? "artículo" : "artículos"}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-[#808080] text-[9px] font-bold uppercase tracking-wide">
+            {labels.total}
+          </p>
+          <p className="text-[#e5e2e1] text-[18px] font-black tabular-nums leading-none mt-0.5">
+            ${pos.total.toFixed(2)}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {labels.paymentMethodOptions.map(({ id, label }) => {
+          const Icon = PAYMENT_ICONS[id as keyof typeof PAYMENT_ICONS] ?? CreditCard;
+          const selected = pos.paymentMethod === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => pos.setPaymentMethod(id)}
+              className={`flex flex-col items-center justify-center gap-1 px-2 py-2.5 transition-colors min-h-[56px] ${
+                selected
+                  ? "bg-[#e31e24] text-white"
+                  : "bg-[#131313] text-[#808080] border border-[rgba(93,63,60,0.25)] hover:border-[#e31e24] hover:text-[#e5e2e1]"
+              }`}
+            >
+              <Icon size={18} />
+              <span className="text-[9px] font-bold tracking-wide uppercase leading-tight text-center">
+                {label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => void pos.handleCheckout()}
+        disabled={!canCheckout}
+        className={`w-full flex items-center justify-center gap-2 py-3.5 text-[11px] font-bold tracking-[1.2px] uppercase transition-colors ${
+          canCheckout
+            ? "bg-[#e31e24] text-white hover:bg-[#c41a20] cursor-pointer"
+            : "bg-[#1a1a1a] text-[#393939] cursor-not-allowed"
+        }`}
+      >
+        <ShoppingCart size={18} />
+        {labels.checkout}
+        <span className="tabular-nums opacity-90">
+          · ${pos.total.toFixed(2)}
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export function PosTerminal() {
   const pos = usePosTerminal();
   const { labels } = pos;
+  const canCheckout = pos.cart.length > 0 && Boolean(pos.paymentMethod);
+  const showCheckoutDock = pos.cart.length > 0;
 
   return (
-    <div className="h-full bg-[#131313] overflow-auto">
-      <div className="p-4 md:p-8">
-        <div className="mb-6">
-          <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
+    <div className={`h-full bg-[#131313] overflow-auto ${showCheckoutDock ? "pb-[11.5rem] lg:pb-8" : ""}`}>
+      <div className="p-4 md:p-6">
+        <div className="mb-3 md:mb-4">
+          <h1 className="text-[#e5e2e1] text-[22px] md:text-[30px] font-black tracking-[-0.5px] uppercase leading-tight">
             {labels.title}
           </h1>
         </div>
@@ -50,7 +128,11 @@ export function PosTerminal() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
+          <div
+            className={`lg:col-span-2 space-y-4 ${
+              showCheckoutDock ? "order-2 lg:order-none" : "order-1 lg:order-none"
+            }`}
+          >
             <div className="flex gap-3">
               <div className="flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4">
                 <div className="relative">
@@ -163,7 +245,7 @@ export function PosTerminal() {
                     </div>
                   </div>
                   <div className="flex justify-between items-end mt-3 pt-3 border-t border-[rgba(93,63,60,0.1)]">
-                    <span className="text-[#e5e2e1] text-[20px] font-black">
+                    <span className="text-[#e5e2e1] text-[16px] font-black">
                       ${product.price.toFixed(2)}
                     </span>
                     <span className="text-[#808080] text-[10px]">
@@ -175,8 +257,12 @@ export function PosTerminal() {
             </div>
           </div>
 
-          <div className="space-y-4">
-            <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4">
+          <div
+            className={`lg:col-span-1 lg:sticky lg:top-4 lg:self-start flex flex-col gap-4 max-h-[calc(100vh-2rem)] ${
+              showCheckoutDock ? "order-1 lg:order-none" : "order-2 lg:order-none"
+            }`}
+          >
+            <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 shrink-0">
               <div className="flex justify-between items-center">
                 <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
                   {labels.cartTitle}
@@ -193,7 +279,7 @@ export function PosTerminal() {
               </div>
             </div>
 
-            <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 min-h-[300px] max-h-[400px] overflow-auto">
+            <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 min-h-[160px] flex-1 overflow-auto lg:max-h-[min(360px,calc(100vh-22rem))]">
               {pos.cart.length === 0 ? (
                 <div className="flex items-center justify-center h-full">
                   <p className="text-[#808080] text-[12px]">{labels.emptyCart}</p>
@@ -250,60 +336,25 @@ export function PosTerminal() {
               )}
             </div>
 
-            <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4">
-              <div className="flex justify-between text-[20px]">
-                <span className="text-[#e31e24] font-black">{labels.total}</span>
-                <span className="text-[#e5e2e1] font-black">
-                  ${pos.total.toFixed(2)} {labels.currencySuffix}
-                </span>
-              </div>
-            </div>
-
-            {pos.cart.length > 0 && (
-              <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4">
-                <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-3">
-                  {labels.paymentMethod}
-                </p>
-                <div className="space-y-2">
-                  {labels.paymentMethodOptions.map(({ id, label }) => {
-                    const Icon = PAYMENT_ICONS[id as keyof typeof PAYMENT_ICONS] ?? CreditCard;
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => pos.setPaymentMethod(id)}
-                        className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${
-                          pos.paymentMethod === id
-                            ? "bg-[#e31e24] text-white"
-                            : "bg-[#131313] text-[#808080] border border-[rgba(93,63,60,0.2)] hover:border-[#e31e24]"
-                        }`}
-                      >
-                        <Icon size={18} />
-                        <span className="text-[12px] font-bold tracking-[0.5px] uppercase">
-                          {label}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+            {showCheckoutDock && (
+              <div className="hidden lg:block shrink-0">
+                <CheckoutDock pos={pos} labels={labels} canCheckout={canCheckout} />
               </div>
             )}
-
-            <button
-              type="button"
-              onClick={() => void pos.handleCheckout()}
-              disabled={pos.cart.length === 0 || !pos.paymentMethod}
-              className={`w-full py-4 text-[12px] font-bold tracking-[1.2px] uppercase transition-colors ${
-                pos.cart.length > 0 && pos.paymentMethod
-                  ? "bg-[#e31e24] text-white hover:bg-[#c41a20] cursor-pointer"
-                  : "bg-[#1a1a1a] text-[#393939] cursor-not-allowed"
-              }`}
-            >
-              {labels.checkout}
-            </button>
           </div>
         </div>
       </div>
+
+      {showCheckoutDock && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40">
+          <CheckoutDock
+            pos={pos}
+            labels={labels}
+            canCheckout={canCheckout}
+            className="border-x-0 border-b-0 rounded-none"
+          />
+        </div>
+      )}
 
       {pos.showAddProductModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
@@ -313,7 +364,7 @@ export function PosTerminal() {
                 <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">
                   {labels.inventory}
                 </p>
-                <h3 className="text-[#e5e2e1] text-[24px] font-black tracking-[-1px] uppercase">
+                <h3 className="text-[#e5e2e1] text-[18px] font-black tracking-[-0.5px] uppercase">
                   {labels.newProduct}
                 </h3>
               </div>
@@ -437,7 +488,7 @@ export function PosTerminal() {
                 <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">
                   {labels.inventory}
                 </p>
-                <h3 className="text-[#e5e2e1] text-[24px] font-black tracking-[-1px] uppercase">
+                <h3 className="text-[#e5e2e1] text-[18px] font-black tracking-[-0.5px] uppercase">
                   {labels.editProduct}
                 </h3>
                 <p className="text-[#808080] text-[11px] font-mono mt-1">

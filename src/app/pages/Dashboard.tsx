@@ -30,20 +30,20 @@ export default function Dashboard() {
       : 0;
 
   return (
-    <div className="p-4 md:p-8 space-y-6 md:space-y-8">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-5">
       <div>
-        <h1 className="text-[#e5e2e1] text-[32px] md:text-[48px] font-black tracking-[-2px] uppercase">
+        <h1 className="text-[#e5e2e1] text-[22px] md:text-[30px] font-black tracking-[-0.5px] uppercase leading-tight">
           Inicio
         </h1>
-        <p className="text-[#808080] text-[11px] mt-2">
+        <p className="text-[#808080] text-[11px] mt-1">
           Resumen de la operación del día.
         </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
-          <div className="flex items-start justify-between mb-4">
-            <Activity className="text-[#e31e24]" size={24} />
+        <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 md:p-5">
+          <div className="flex items-start justify-between mb-3">
+            <Activity className="text-[#e31e24]" size={20} />
             {checkIns > 0 && (
               <span className="text-[10px] text-[#00ff00] font-bold tracking-[1px]">EN VIVO</span>
             )}
@@ -51,31 +51,31 @@ export default function Dashboard() {
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
             Ocupación estimada
           </p>
-          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">{capacityPct}%</p>
+          <p className="text-[#e5e2e1] text-[22px] font-black leading-none">{capacityPct}%</p>
           <p className="text-[#808080] text-[10px] mt-2">
             {checkIns}/{activeMembers || "—"} accesos hoy vs miembros activos
           </p>
         </div>
 
-        <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
-          <div className="flex items-start justify-between mb-4">
-            <Users className="text-[#e31e24]" size={24} />
+        <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 md:p-5">
+          <div className="flex items-start justify-between mb-3">
+            <Users className="text-[#e31e24]" size={20} />
           </div>
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
             Accesos hoy
           </p>
-          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">{checkIns}</p>
+          <p className="text-[#e5e2e1] text-[22px] font-black leading-none">{checkIns}</p>
           <p className="text-[#808080] text-[10px] mt-2">Accesos otorgados hoy</p>
         </div>
 
-        <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
-          <div className="flex items-start justify-between mb-4">
-            <DollarSign className="text-[#e31e24]" size={24} />
+        <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 md:p-5">
+          <div className="flex items-start justify-between mb-3">
+            <DollarSign className="text-[#e31e24]" size={20} />
           </div>
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
             Ingresos hoy
           </p>
-          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">
+          <p className="text-[#e5e2e1] text-[22px] font-black leading-none">
             {formatMoney(revenue.total)}
           </p>
           <p className="text-[#808080] text-[10px] mt-2">
@@ -83,22 +83,22 @@ export default function Dashboard() {
           </p>
         </div>
 
-        <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
-          <div className="flex items-start justify-between mb-4">
-            <TrendingUp className="text-[#e31e24]" size={24} />
+        <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 md:p-5">
+          <div className="flex items-start justify-between mb-3">
+            <TrendingUp className="text-[#e31e24]" size={20} />
           </div>
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
             Miembros activos
           </p>
-          <p className="text-[#e5e2e1] text-[32px] font-black leading-none">
+          <p className="text-[#e5e2e1] text-[22px] font-black leading-none">
             {activeMembers.toLocaleString("es-MX")}
           </p>
           <p className="text-[#808080] text-[10px] mt-2">Membresía vigente hoy</p>
         </div>
       </div>
 
-      <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
-        <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
+      <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 md:p-5">
+        <p className="text-[#e31e24] text-[9px] font-bold tracking-[1.5px] uppercase mb-3">
           Horas pico
         </p>
         <div className="space-y-3">
@@ -119,8 +119,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-6">
-        <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
+      <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 md:p-5">
+        <p className="text-[#e31e24] text-[9px] font-bold tracking-[1.5px] uppercase mb-3">
           Actividad reciente
         </p>
         {activity.length === 0 ? (

@@ -4,8 +4,11 @@ import type {
   PosProduct,
   PosSale,
   PosTicketReceipt,
+  PosTransactionType,
+  SubscriptionCheckoutInput,
   UpdateProductInput,
 } from "../domain/types";
+import type { PosRepository } from "../application/posRepository";
 
 export interface PosRepository {
   listProducts(params?: {
@@ -20,6 +23,11 @@ export interface PosRepository {
     receipt: PosTicketReceipt;
     products: PosProduct[];
   }>;
-  listSales(params?: { fromIso?: string; toIso?: string }): Promise<PosSale[]>;
+  checkoutSubscription(input: SubscriptionCheckoutInput): Promise<{ sale: PosSale }>;
+  listSales(params?: {
+    from?: string;
+    to?: string;
+    type?: PosTransactionType;
+  }): Promise<PosSale[]>;
   listSalesToday(): Promise<PosSale[]>;
 }

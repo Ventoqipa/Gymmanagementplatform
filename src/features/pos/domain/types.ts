@@ -2,6 +2,10 @@
 
 export type IvaRegimen = "general" | "exento" | "sin_iva";
 
+export type PosTransactionType = "product" | "subscription";
+
+export type SubscriptionConcept = "MEMBERSHIP" | "RENEWAL" | "OTHER";
+
 export type PosProduct = {
   id: string;
   name: string;
@@ -52,6 +56,7 @@ export type PosSaleLine = {
 
 export type PosSale = {
   id: string;
+  transactionType?: PosTransactionType;
   total: number;
   subtotal: number;
   tax: number;
@@ -64,7 +69,27 @@ export type PosSale = {
   payerName?: string;
   ivaRegimen: IvaRegimen;
   ivaRate: number;
+  subscriptionConcept?: SubscriptionConcept;
+  periodKey?: string;
   lines?: PosSaleLine[];
+};
+
+export type PosReportBucket = {
+  count: number;
+  total: number;
+  subtotal: number;
+  tax: number;
+};
+
+export type SubscriptionCheckoutInput = {
+  memberId: string;
+  memberName?: string;
+  amount: number;
+  paymentMethod: string;
+  concept?: SubscriptionConcept;
+  periodKey?: string;
+  payerId?: string;
+  payerName?: string;
 };
 
 export type CreateProductInput = {

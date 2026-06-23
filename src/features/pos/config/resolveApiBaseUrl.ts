@@ -1,5 +1,5 @@
 /**
- * Resuelve URL base del API POS (proxy en dev, ruta relativa en prod).
+ * Resuelve URL base del API POS (proxy en dev/prod, ruta relativa /pos-api).
  */
 export function resolveApiBaseUrl(options: {
   envUrl: string | undefined;

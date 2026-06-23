@@ -6,6 +6,8 @@ import type {
   PosProduct,
   PosSale,
   PosTicketReceipt,
+  PosTransactionType,
+  SubscriptionCheckoutInput,
   UpdateProductInput,
 } from "../domain/types";
 import type { MemoryPosRepository } from "./memoryPosRepository";
@@ -83,9 +85,21 @@ export class HybridPosRepository implements PosRepository {
     }
   }
 
+  async checkoutSubscription(
+    input: SubscriptionCheckoutInput,
+  ): Promise<{ sale: PosSale }> {
+    try {
+      return await this.remote.checkoutSubscription(input);
+    } catch (error) {
+      if (!this.shouldFallback(error)) throw error;
+      return this.local.checkoutSubscription(input);
+    }
+  }
+
   async listSales(params?: {
-    fromIso?: string;
-    toIso?: string;
+    from?: string;
+    to?: string;
+    type?: PosTransactionType;
   }): Promise<PosSale[]> {
     try {
       return await this.remote.listSales(params);
