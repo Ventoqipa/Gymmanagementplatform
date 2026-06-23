@@ -20,9 +20,11 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { addClientUseCase, listClientsUseCase, listPlansUseCase } from "../core/catalog";
-import type { PlanWithValidity } from "../core/catalog";
-import { renewalDateFromPlan } from "../lib/plansStore";
+import { addClientUseCase, listClientsUseCase } from "../core/catalog";
+import {
+  getSubscriptionPrice,
+  type SubscriptionPeriodKey,
+} from "../lib/plansStore";
 import { useAuth } from "../context/AuthContext";
 import { addMembershipPayment, getPaymentsForMember } from "../lib/demoStore";
 import {
@@ -108,6 +110,79 @@ function urgencyBarClass(level: ExpiryUrgency): string {
   }
 }
 
+function subscriptionPeriodDays(member: Pick<Member, "enrollmentDate" | "renewalDate">): number {
+  const start = new Date(member.enrollmentDate + "T12:00:00").getTime();
+  const end = new Date(member.renewalDate + "T12:00:00").getTime();
+  if (end <= start) return 1;
+  return Math.round((end - start) / 86400000);
+}
+
+const LEGACY_TIER_LABELS = new Set(["ELITE_BLK", "PLATINUM_ELITE", "GOLD", "BASIC", "INACTIVE"]);
+
+/** Nombre del plan contratado cuando está disponible (no etiquetas legacy de tier). */
+function memberPlanLabel(tier: string): string | null {
+  const t = tier.trim();
+  if (!t || LEGACY_TIER_LABELS.has(t)) return null;
+  return t;
+}
+
+function getExpiryLevel(renewalDateIso: string): ExpiryUrgency {
+  return getExpiryMeta(renewalDateIso).level;
+}
+
+function memberInitials(member: Pick<Member, "firstName" | "lastName">): string {
+  const a = member.firstName.trim()[0] ?? "";
+  const b = member.lastName.trim()[0] ?? "";
+  return (a + b).toUpperCase() || "?";
+}
+
+function expiryAvatarClass(level: ExpiryUrgency): string {
+  switch (level) {
+    case "expired":
+      return "bg-[#e31e24]/25 text-[#ff6b6b] ring-1 ring-[#e31e24]/40";
+    case "critical":
+      return "bg-[#ff5722]/20 text-[#ffab91] ring-1 ring-[#ff5722]/35";
+    case "warning":
+      return "bg-[#ffa726]/18 text-[#ffcc80] ring-1 ring-[#ffa726]/35";
+    case "notice":
+      return "bg-[#fdd835]/12 text-[#fff59d] ring-1 ring-[#fdd835]/30";
+    default:
+      return "bg-[#00c853]/12 text-[#69f0ae] ring-1 ring-[#00c853]/30";
+  }
+}
+
+function expiryRowBorderClass(level: ExpiryUrgency, expanded: boolean): string {
+  if (expanded) return "border-l-[#e31e24]";
+  switch (level) {
+    case "expired":
+      return "border-l-[#e31e24]/90";
+    case "critical":
+      return "border-l-[#ff5722]/75";
+    case "warning":
+      return "border-l-[#ffa726]/60";
+    case "notice":
+      return "border-l-[#fdd835]/45";
+    default:
+      return "border-l-transparent";
+  }
+}
+
+type ExpiryFilter = ExpiryUrgency | "ALL";
+
+const EXPIRY_FILTER_OPTIONS: {
+  value: ExpiryFilter;
+  label: string;
+  shortLabel: string;
+  dotClass: string;
+}[] = [
+  { value: "ALL", label: "Todos", shortLabel: "Todos", dotClass: "bg-[#808080]" },
+  { value: "expired", label: "Vencida", shortLabel: "Vencida", dotClass: "bg-[#e31e24]" },
+  { value: "critical", label: "≤7 días", shortLabel: "≤7d", dotClass: "bg-[#ff5722]" },
+  { value: "warning", label: "8–30 días", shortLabel: "8–30d", dotClass: "bg-[#ffa726]" },
+  { value: "notice", label: "31–90 días", shortLabel: "31–90d", dotClass: "bg-[#ffeb3b]" },
+  { value: "ok", label: "OK (>90 días)", shortLabel: ">90d", dotClass: "bg-[#00c853]" },
+];
+
 function urgencyPillClass(level: ExpiryUrgency): string {
   switch (level) {
     case "expired":
@@ -123,49 +198,83 @@ function urgencyPillClass(level: ExpiryUrgency): string {
   }
 }
 
+function formatRenewalDate(renewalDateIso: string): string {
+  return new Date(renewalDateIso).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 function MemberExpiryIndicator({
   member,
-  compact = false,
+  layout = "stack",
 }: {
   member: Member;
-  compact?: boolean;
+  /** compact: solo pill · stack: vertical · twoRow: fecha+estado / barra+periodo */
+  layout?: "compact" | "stack" | "twoRow";
 }) {
   const meta = getExpiryMeta(member.renewalDate);
   const progress = membershipPeriodProgress(member.enrollmentDate, member.renewalDate);
   const pct = Math.round(progress * 100);
+  const tooltip = `Vigencia: ${meta.label}. Periodo membresía ~${pct}% transcurrido (alta → renovación).`;
 
-  if (compact) {
-    return (
-      <span
-        className={`inline-flex items-center max-w-full px-2 py-0.5 rounded border text-[8px] font-bold uppercase tracking-wide leading-tight ${urgencyPillClass(meta.level)}`}
-        title={`Vigencia: ${meta.label}. Periodo ~${pct}% transcurrido.`}
-      >
-        {meta.label}
-      </span>
-    );
-  }
-
-  return (
-    <div
-      className="flex flex-col gap-1.5 min-w-0 max-w-[160px]"
-      title={`Vigencia: ${meta.label}. Periodo membresía ~${pct}% transcurrido (alta → renovación).`}
+  const pill = (
+    <span
+      className={`inline-flex items-center w-fit max-w-full px-2 py-0.5 rounded border text-[8px] font-bold uppercase tracking-wide leading-tight shrink-0 ${urgencyPillClass(
+        meta.level
+      )}`}
     >
-      <span
-        className={`inline-flex items-center w-fit px-2 py-0.5 rounded border text-[8px] font-bold uppercase tracking-wide ${urgencyPillClass(
-          meta.level
-        )}`}
-      >
-        {meta.label}
-      </span>
+      {meta.label}
+    </span>
+  );
+
+  const progressBlock = (
+    <div className="flex flex-col gap-1 w-full min-w-0">
       <div className="h-1 bg-[#1a1a1a] rounded-full overflow-hidden w-full">
         <div
           className={`h-full rounded-full transition-[width] ${urgencyBarClass(meta.level)}`}
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="text-[8px] text-[#5a5a5a] uppercase tracking-wide">
+      <span className="text-[8px] text-[#5a5a5a] uppercase tracking-wide truncate">
         Periodo {pct}% · hasta renovación
       </span>
+    </div>
+  );
+
+  if (layout === "compact") {
+    return (
+      <span
+        className={`inline-flex items-center max-w-full px-2 py-0.5 rounded border text-[8px] font-bold uppercase tracking-wide leading-tight ${urgencyPillClass(meta.level)}`}
+        title={tooltip}
+      >
+        {meta.label}
+      </span>
+    );
+  }
+
+  if (layout === "twoRow") {
+    return (
+      <div
+        className="grid grid-rows-2 gap-1.5 w-full min-w-0"
+        title={tooltip}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 min-w-0">
+          <span className="text-[#e5e2e1] text-[11px] whitespace-nowrap shrink-0">
+            {formatRenewalDate(member.renewalDate)}
+          </span>
+          {pill}
+        </div>
+        {progressBlock}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 min-w-0 w-full max-w-[220px] sm:max-w-none" title={tooltip}>
+      {pill}
+      {progressBlock}
     </div>
   );
 }
@@ -209,18 +318,52 @@ function renewalAfterMonths(enrollmentIso: string, months: number): string {
   return renewalAfterPeriod(enrollmentIso, { months });
 }
 
-const emptyNewMemberForm = (defaultPlanId = 0, defaultRenewal = "") => {
+const DEFAULT_MEMBER_PLAN_ID = 1;
+
+const SUBSCRIPTION_PERIOD_OPTIONS = [
+  { key: "1d" as const, label: "1 día", period: { days: 1 } },
+  { key: "1w" as const, label: "1 semana", period: { weeks: 1 } },
+  { key: "1m" as const, label: "1 mes", period: { months: 1 } },
+  { key: "3m" as const, label: "3 meses", period: { months: 3 } },
+  { key: "6m" as const, label: "6 meses", period: { months: 6 } },
+  { key: "12m" as const, label: "12 meses", period: { months: 12 } },
+];
+
+function applySubscriptionPeriod(
+  enrollmentIso: string,
+  periodKey: SubscriptionPeriodKey | null,
+): { renewalDate: string; cost: string } {
+  const key = periodKey ?? "1m";
+  const opt = SUBSCRIPTION_PERIOD_OPTIONS.find((p) => p.key === key);
+  if (!opt) {
+    return {
+      renewalDate: renewalAfterMonths(enrollmentIso, 1),
+      cost: getSubscriptionPrice("1m").toFixed(2),
+    };
+  }
+  return {
+    renewalDate: renewalAfterPeriod(enrollmentIso, opt.period),
+    cost: getSubscriptionPrice(key).toFixed(2),
+  };
+}
+
+const emptyNewMemberForm = () => {
   const today = new Date().toISOString().slice(0, 10);
-  const enroll = today;
+  const defaultPeriod: SubscriptionPeriodKey = "1m";
+  const { renewalDate, cost } = applySubscriptionPeriod(today, defaultPeriod);
   return {
     firstName: "",
     lastName: "",
     email: "",
     phoneCountryDial: "52",
     phoneNational: "",
-    planID: defaultPlanId,
-    enrollmentDate: enroll,
-    renewalDate: defaultRenewal || renewalAfterMonths(enroll, 6),
+    planID: DEFAULT_MEMBER_PLAN_ID,
+    selectedPeriodKey: defaultPeriod as SubscriptionPeriodKey | null,
+    subscriptionCost: cost,
+    payNow: true,
+    paymentMethod: "CARD" as "CASH" | "CARD" | "QR",
+    enrollmentDate: today,
+    renewalDate,
     enrollFaceId: true,
     faceIdTerminal: "TRN-MAIN-01",
     address: "",
@@ -236,10 +379,8 @@ export default function Members() {
   const [membersFromApi, setMembersFromApi] = useState(false);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [newMemberForm, setNewMemberForm] = useState(emptyNewMemberForm());
-  const [membershipPlans, setMembershipPlans] = useState<PlanWithValidity[]>([]);
-  const [plansLoading, setPlansLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterTier, setFilterTier] = useState<string>("ALL");
+  const [filterExpiry, setFilterExpiry] = useState<ExpiryFilter>("ALL");
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
   const [paymentModalMember, setPaymentModalMember] = useState<Member | null>(null);
@@ -442,28 +583,51 @@ export default function Members() {
   };
 
   // Filter members
-  const filteredMembers = members.filter((member) => {
+  const searchMatchedMembers = useMemo(() => {
     const q = searchTerm.toLowerCase();
-    const addr = (member.address ?? "").toLowerCase();
-    const emailLower = (member.email ?? "").toLowerCase();
-    const phoneDigits = normalizePhoneDigits(member.phone ?? "");
     const qCompact = q.replace(/\s/g, "");
     const qPhoneDigits = normalizePhoneDigits(searchTerm);
-    const fullName = memberFullName(member).toLowerCase();
-    const matchesSearch =
-      fullName.includes(q) ||
-      member.firstName.toLowerCase().includes(q) ||
-      member.lastName.toLowerCase().includes(q) ||
-      member.id.toLowerCase().includes(q) ||
-      (emailLower && emailLower.includes(q)) ||
-      (member.phone ?? "").toLowerCase().replace(/\s/g, "").includes(qCompact) ||
-      (qPhoneDigits.length >= 4 && phoneDigits.includes(qPhoneDigits)) ||
-      addr.includes(q);
 
-    const matchesTier = filterTier === "ALL" || member.tier === filterTier;
+    return members.filter((member) => {
+      const addr = (member.address ?? "").toLowerCase();
+      const emailLower = (member.email ?? "").toLowerCase();
+      const phoneDigits = normalizePhoneDigits(member.phone ?? "");
+      const fullName = memberFullName(member).toLowerCase();
 
-    return matchesSearch && matchesTier;
-  });
+      return (
+        fullName.includes(q) ||
+        member.firstName.toLowerCase().includes(q) ||
+        member.lastName.toLowerCase().includes(q) ||
+        member.id.toLowerCase().includes(q) ||
+        (emailLower && emailLower.includes(q)) ||
+        (member.phone ?? "").toLowerCase().replace(/\s/g, "").includes(qCompact) ||
+        (qPhoneDigits.length >= 4 && phoneDigits.includes(qPhoneDigits)) ||
+        addr.includes(q)
+      );
+    });
+  }, [members, searchTerm]);
+
+  const expiryFilterCounts = useMemo(() => {
+    const counts: Record<ExpiryFilter, number> = {
+      ALL: searchMatchedMembers.length,
+      expired: 0,
+      critical: 0,
+      warning: 0,
+      notice: 0,
+      ok: 0,
+    };
+    for (const member of searchMatchedMembers) {
+      counts[getExpiryLevel(member.renewalDate)] += 1;
+    }
+    return counts;
+  }, [searchMatchedMembers]);
+
+  const filteredMembers = useMemo(() => {
+    if (filterExpiry === "ALL") return searchMatchedMembers;
+    return searchMatchedMembers.filter(
+      (member) => getExpiryLevel(member.renewalDate) === filterExpiry,
+    );
+  }, [searchMatchedMembers, filterExpiry]);
 
   // Pagination
   const totalPages = Math.ceil(filteredMembers.length / ITEMS_PER_PAGE);
@@ -472,7 +636,7 @@ export default function Members() {
   const currentMembers = filteredMembers.slice(startIndex, endIndex);
 
   // Reset to page 1 when filters change
-  const handleFilterChange = (setter: (value: string) => void, value: string) => {
+  const handleFilterChange = <T,>(setter: (value: T) => void, value: T) => {
     setter(value);
     setCurrentPage(1);
   };
@@ -503,28 +667,9 @@ export default function Members() {
     setPaymentsTick((t) => t + 1);
   };
 
-  const openAddMemberModal = async () => {
-    setPlansLoading(true);
-    const plansResult = await listPlansUseCase();
-    setPlansLoading(false);
-    if (!plansResult.ok || plansResult.plans.length === 0) {
-      toast.error("Configure al menos un plan en la sección Planes antes de registrar miembros.");
-      return;
-    }
-    setMembershipPlans(plansResult.plans);
-    const first = plansResult.plans[0];
-    const enroll = new Date().toISOString().slice(0, 10);
-    setNewMemberForm(
-      emptyNewMemberForm(
-        first.planID,
-        renewalDateFromPlan(enroll, first.planID),
-      ),
-    );
+  const openAddMemberModal = () => {
+    setNewMemberForm(emptyNewMemberForm());
     setShowAddMemberModal(true);
-  };
-
-  const applyPlanToRenewal = (planId: number, enrollmentIso: string) => {
-    return renewalDateFromPlan(enrollmentIso, planId);
   };
 
   const submitNewMember = async (e: React.FormEvent) => {
@@ -579,11 +724,11 @@ export default function Members() {
       toast.error("La renovación debe estar entre la fecha de alta y como máximo un año después.");
       return;
     }
-    if (!newMemberForm.planID || newMemberForm.planID <= 0) {
-      toast.error("Seleccione un plan de membresía.");
+    const paymentAmount = parseFloat(newMemberForm.subscriptionCost);
+    if (newMemberForm.payNow && (Number.isNaN(paymentAmount) || paymentAmount <= 0)) {
+      toast.error("Indica un costo de suscripción válido para registrar el pago.");
       return;
     }
-    const selectedPlan = membershipPlans.find((p) => p.planID === newMemberForm.planID);
     const addressTrim = newMemberForm.address.trim();
     setSavingNewMember(true);
 
@@ -595,7 +740,7 @@ export default function Members() {
         phoneNumber: phoneForApi,
         phoneCodeNumber: dial,
         fullAddress: addressTrim || undefined,
-        planID: newMemberForm.planID,
+        planID: DEFAULT_MEMBER_PLAN_ID,
         enrollmentDate: newMemberForm.enrollmentDate,
         renewalDate: newMemberForm.renewalDate,
         idDocumentDataUrl: newMemberForm.idDocumentDataUrl,
@@ -612,7 +757,6 @@ export default function Members() {
       row = {
         ...row,
         phone: phoneDisplay,
-        tier: selectedPlan?.planName ?? apiResult.member.tier,
         ...(newMemberForm.idDocumentDataUrl
           ? { idDocumentDataUrl: newMemberForm.idDocumentDataUrl }
           : {}),
@@ -643,17 +787,28 @@ export default function Members() {
         saveMembers(next);
         return next;
       });
+      if (newMemberForm.payNow) {
+        addMembershipPayment({
+          memberId: row.id,
+          amount: paymentAmount,
+          concept: "MEMBERSHIP",
+          method: newMemberForm.paymentMethod,
+        });
+        setPaymentsTick((t) => t + 1);
+      }
       setMembersFromApi(true);
       setShowAddMemberModal(false);
       setExpandedMember(row.id);
       setCurrentPage(1);
       setSearchTerm("");
-      setFilterTier("ALL");
+      setFilterExpiry("ALL");
       toast.success("Miembro registrado", {
         description:
-          newMemberForm.enrollFaceId && row.faceIdEnrolled
-            ? `${fullName} · ${row.id} · Rostro registrado`
-            : `${fullName} · ${row.id}`,
+          newMemberForm.payNow
+            ? `${fullName} · ${row.id} · Pago $${paymentAmount.toFixed(2)} registrado`
+            : newMemberForm.enrollFaceId && row.faceIdEnrolled
+              ? `${fullName} · ${row.id} · Rostro registrado`
+              : `${fullName} · ${row.id}`,
       });
     } finally {
       setSavingNewMember(false);
@@ -698,86 +853,76 @@ export default function Members() {
           </div>
         </div>
 
-        {/* Search and Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {/* Search Bar */}
-          <div>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#808080]" size={16} />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                placeholder="Nombre, ID, WhatsApp o correo..."
-                className="w-full bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] pl-10 pr-4 py-2.5 focus:border-[#e31e24] focus:outline-none transition-colors font-['Space_Grotesk',sans-serif] text-[12px]"
-              />
-            </div>
+        {/* Search and vigencia filters */}
+        <div className="space-y-4 mb-6">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#808080]" size={16} />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="Nombre, ID, WhatsApp o correo..."
+              className="w-full bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] pl-10 pr-4 py-2.5 focus:border-[#e31e24] focus:outline-none transition-colors font-['Space_Grotesk',sans-serif] text-[12px]"
+            />
           </div>
 
-          {/* Tier Filter */}
           <div>
-            <select
-              value={filterTier}
-              onChange={(e) => handleFilterChange(setFilterTier, e.target.value)}
-              className="w-full bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-2.5 focus:border-[#e31e24] focus:outline-none transition-colors font-['Space_Grotesk',sans-serif] text-[12px]"
-            >
-              <option value="ALL">All Tiers</option>
-              <option value="ELITE_BLK">ELITE_BLK</option>
-              <option value="PLATINUM_ELITE">PLATINUM_ELITE</option>
-              <option value="GOLD">GOLD</option>
-              <option value="BASIC">BASIC</option>
-            </select>
+            <p className="text-[#808080] text-[9px] font-bold uppercase tracking-[1px] mb-2">
+              Filtrar por vigencia
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {EXPIRY_FILTER_OPTIONS.map((opt) => {
+                const active = filterExpiry === opt.value;
+                const count = expiryFilterCounts[opt.value];
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => handleFilterChange(setFilterExpiry, opt.value)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded border text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                      active
+                        ? "bg-[#e31e24]/15 border-[#e31e24]/50 text-[#e5e2e1]"
+                        : "bg-[#131313] border-[rgba(93,63,60,0.2)] text-[#808080] hover:border-[rgba(93,63,60,0.45)] hover:text-[#e5e2e1]"
+                    }`}
+                    title={opt.label}
+                  >
+                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${opt.dotClass}`} />
+                    <span className="hidden sm:inline">{opt.label}</span>
+                    <span className="sm:hidden">{opt.shortLabel}</span>
+                    <span
+                      className={`tabular-nums text-[9px] px-1.5 py-0.5 rounded ${
+                        active ? "bg-[#e31e24]/25 text-white" : "bg-[#1a1a1a] text-[#5a5a5a]"
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        <p className="text-[#5a5a5a] text-[9px] mb-4 leading-relaxed flex flex-wrap gap-x-4 gap-y-1">
-          <span>
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#00c853] align-middle mr-1.5" />
-            OK (&gt;90d)
-          </span>
-          <span>
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#ffeb3b] align-middle mr-1.5" />
-            31–90d
-          </span>
-          <span>
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#ffa726] align-middle mr-1.5" />
-            8–30d
-          </span>
-          <span>
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#ff5722] align-middle mr-1.5" />
-            ≤7d
-          </span>
-          <span>
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#e31e24] align-middle mr-1.5" />
-            Vencida
-          </span>
-        </p>
-
-        {/* Members Table */}
-        <div className="space-y-1 overflow-x-auto">
+        {/* Members list — ancho completo, sin scroll horizontal forzado */}
+        <div className="w-full space-y-0">
           {/* Table Header */}
-          <div className="hidden lg:grid grid-cols-12 gap-4 pb-3 border-b border-[rgba(93,63,60,0.2)] min-w-[940px]">
-            <div className="col-span-1">
-              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">ID</span>
-            </div>
-            <div className="col-span-3">
+          <div className="hidden lg:grid w-full grid-cols-12 gap-3 xl:gap-4 pb-3 border-b border-[rgba(93,63,60,0.2)]">
+            <div className="col-span-4 xl:col-span-3">
               <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Nombre</span>
-            </div>
-            <div className="col-span-2">
-              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Rango</span>
             </div>
             <div className="col-span-2">
               <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Alta</span>
             </div>
-            <div className="col-span-3">
+            <div className="col-span-4 xl:col-span-3">
               <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Vigencia</span>
             </div>
             <div className="col-span-1 text-center">
               <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Visitas</span>
             </div>
+            <div className="col-span-1" aria-hidden />
           </div>
 
           {/* Table Rows */}
@@ -788,103 +933,142 @@ export default function Members() {
             </div>
           ) : currentMembers.length === 0 ? (
             <div className="py-12 text-center">
-              <p className="text-[#808080] text-[14px]">No se encontraron miembros</p>
+              <p className="text-[#808080] text-[14px]">
+                {filterExpiry !== "ALL"
+                  ? "Ningún miembro coincide con este filtro de vigencia"
+                  : "No se encontraron miembros"}
+              </p>
+              {filterExpiry !== "ALL" && (
+                <button
+                  type="button"
+                  onClick={() => handleFilterChange(setFilterExpiry, "ALL")}
+                  className="mt-3 text-[#e31e24] text-[11px] font-bold uppercase tracking-wide hover:underline"
+                >
+                  Ver todos
+                </button>
+              )}
             </div>
           ) : (
-            currentMembers.map((member) => (
-              <div key={member.id}>
+            currentMembers.map((member) => {
+              const expiryLevel = getExpiryLevel(member.renewalDate);
+              const isExpanded = expandedMember === member.id;
+
+              return (
+              <div key={member.id} className="w-full min-w-0 group/member">
                 {/* Member Row - Desktop */}
                 <div
-                  onClick={() => setExpandedMember(expandedMember === member.id ? null : member.id)}
-                  className="hidden lg:grid grid-cols-12 gap-4 py-3 border-b border-[rgba(93,63,60,0.05)] hover:bg-[#131313] transition-colors cursor-pointer min-w-[940px]"
+                  onClick={() => setExpandedMember(isExpanded ? null : member.id)}
+                  className={`hidden lg:grid w-full grid-cols-12 gap-3 xl:gap-4 py-3.5 px-2 border-b border-l-2 transition-colors cursor-pointer min-w-0 ${
+                    isExpanded
+                      ? "bg-[#1a1a1a] border-b-[rgba(93,63,60,0.08)]"
+                      : "border-b-[rgba(93,63,60,0.05)] hover:bg-[#131313]"
+                  } ${expiryRowBorderClass(expiryLevel, isExpanded)}`}
                 >
-                  <div className="col-span-1 flex items-center gap-2">
-                    {expandedMember === member.id ? (
-                      <ChevronUp size={14} className="text-[#e31e24]" />
-                    ) : (
-                      <ChevronDown size={14} className="text-[#808080]" />
-                    )}
-                    <span className="text-[#808080] text-[10px] font-mono">{member.id}</span>
-                  </div>
-                  <div className="col-span-3 flex flex-col justify-center min-w-0">
-                    <span className="text-[#e5e2e1] text-[14px] font-bold">{memberFullName(member)}</span>
-                    <span className="text-[#e5e2e1] text-[10px] font-mono tracking-tight truncate" title={member.phone}>
-                      {member.phone}
-                    </span>
-                    {member.email ? (
-                      <span className="text-[#808080] text-[9px] truncate" title={member.email}>
-                        {member.email}
-                      </span>
-                    ) : (
-                      <span className="text-[#5a5a5a] text-[9px]">Sin correo</span>
-                    )}
-                  </div>
-                  <div className="col-span-2 flex items-center">
-                    <span className="text-[#e31e24] text-[10px] tracking-[1px] uppercase font-bold">
-                      {member.tier}
-                    </span>
-                  </div>
-                  <div className="col-span-2 flex items-center">
-                    <span className="text-[#e5e2e1] text-[11px]">
-                      {new Date(member.enrollmentDate).toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric'
-                      })}
-                    </span>
-                  </div>
-                  <div className="col-span-3 flex flex-col justify-center gap-1.5">
-                    <span className="text-[#e5e2e1] text-[11px]">
-                      {new Date(member.renewalDate).toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric'
-                      })}
-                    </span>
-                    <MemberExpiryIndicator member={member} />
-                  </div>
-                  <div className="col-span-1 flex items-center justify-center">
-                    <span className="text-[#e5e2e1] text-[12px] font-bold">{member.monthlyVisits}</span>
-                  </div>
-                </div>
-
-                {/* Member Row - Mobile */}
-                <div
-                  onClick={() => setExpandedMember(expandedMember === member.id ? null : member.id)}
-                  className="lg:hidden p-4 border-b border-[rgba(93,63,60,0.05)] bg-[#131313] hover:bg-[#1a1a1a] transition-colors cursor-pointer"
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        {expandedMember === member.id ? (
-                          <ChevronUp size={14} className="text-[#e31e24]" />
-                        ) : (
-                          <ChevronDown size={14} className="text-[#808080]" />
-                        )}
-                        <span className="text-[#808080] text-[10px] font-mono">{member.id}</span>
+                  <div className="col-span-4 xl:col-span-3 flex items-center gap-3 min-w-0">
+                    <div
+                      className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-[11px] font-black ${expiryAvatarClass(expiryLevel)}`}
+                      aria-hidden
+                    >
+                      {memberInitials(member)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 min-w-0 mb-0.5">
+                        <span className="text-[#e5e2e1] text-[14px] font-bold truncate">
+                          {memberFullName(member)}
+                        </span>
                       </div>
-                      <span className="text-[#e5e2e1] text-[14px] font-bold block">{memberFullName(member)}</span>
-                      <span className="text-[#e5e2e1] text-[11px] font-mono block truncate">{member.phone}</span>
+                      <span className="text-[#e5e2e1] text-[10px] font-mono tracking-tight truncate block" title={member.phone}>
+                        {member.phone}
+                      </span>
                       {member.email ? (
-                        <span className="text-[#808080] text-[9px] block truncate">{member.email}</span>
+                        <span className="text-[#808080] text-[9px] truncate block" title={member.email}>
+                          {member.email}
+                        </span>
                       ) : (
                         <span className="text-[#5a5a5a] text-[9px]">Sin correo</span>
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 mt-2">
-                    <MemberExpiryIndicator member={member} compact />
+                 
+                  <div className="col-span-2 flex flex-col justify-center gap-0.5">
+                    <span className="text-[#808080] text-[8px] uppercase tracking-wide">Alta</span>
+                    <span className="text-[#e5e2e1] text-[11px]">
+                      {formatRenewalDate(member.enrollmentDate)}
+                    </span>
                   </div>
-                  <div className="flex items-center justify-between text-[10px] mt-2">
-                    <span className="text-[#e31e24] font-bold tracking-[1px] uppercase">{member.tier}</span>
-                    <span className="text-[#808080]">{member.monthlyVisits} visits</span>
+                  <div className="col-span-4 xl:col-span-3 flex items-center min-w-0 pr-1">
+                    <MemberExpiryIndicator member={member} layout="twoRow" />
+                  </div>
+                  <div className="col-span-1 flex flex-col items-center justify-center gap-0.5">
+                    <span className="text-[#808080] text-[8px] uppercase tracking-wide">Vis.</span>
+                    <span className="text-[#e5e2e1] text-[13px] font-bold tabular-nums">{member.monthlyVisits}</span>
+                  </div>
+                  <div className="col-span-1 flex items-center justify-end pr-1">
+                    {isExpanded ? (
+                      <ChevronUp size={16} className="text-[#e31e24]" />
+                    ) : (
+                      <ChevronDown size={16} className="text-[#808080] group-hover/member:text-[#e5e2e1] transition-colors" />
+                    )}
                   </div>
                 </div>
 
-                {/* Expanded Details */}
-                {expandedMember === member.id && (
-                  <div className="bg-[#131313] border-b border-[rgba(93,63,60,0.05)] p-4 md:p-6 space-y-6">
-                    <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+                {/* Member Row - Mobile */}
+                <div
+                  onClick={() => setExpandedMember(isExpanded ? null : member.id)}
+                  className={`lg:hidden w-full p-4 border-b border-l-2 transition-colors cursor-pointer min-w-0 ${
+                    isExpanded
+                      ? "bg-[#1a1a1a] border-b-[rgba(93,63,60,0.08)]"
+                      : "border-b-[rgba(93,63,60,0.05)] bg-[#131313] hover:bg-[#1a1a1a]"
+                  } ${expiryRowBorderClass(expiryLevel, isExpanded)}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-[12px] font-black ${expiryAvatarClass(expiryLevel)}`}
+                      aria-hidden
+                    >
+                      {memberInitials(member)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-0.5">
+                            <span className="text-[#e5e2e1] text-[15px] font-bold leading-tight block">
+                              {memberFullName(member)}
+                            </span>
+                          </div>
+                          <span className="text-[#808080] text-[10px] font-mono">{member.id}</span>
+                        </div>
+                        {isExpanded ? (
+                          <ChevronUp size={16} className="text-[#e31e24] shrink-0 mt-0.5" />
+                        ) : (
+                          <ChevronDown size={16} className="text-[#808080] shrink-0 mt-0.5" />
+                        )}
+                      </div>
+                      <span className="text-[#e5e2e1] text-[11px] font-mono block truncate">{member.phone}</span>
+                      {member.email ? (
+                        <span className="text-[#808080] text-[9px] block truncate mt-0.5">{member.email}</span>
+                      ) : (
+                        <span className="text-[#5a5a5a] text-[9px] mt-0.5">Sin correo</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-3 w-full min-w-0 pl-14">
+                    <MemberExpiryIndicator member={member} layout="twoRow" />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] mt-3 pl-14 pt-2 border-t border-[rgba(93,63,60,0.08)]">
+                    <span className="text-[#808080]">
+                      Alta · {formatRenewalDate(member.enrollmentDate)}
+                    </span>
+                    <span className="text-[#808080] tabular-nums">
+                      <span className="text-[#e5e2e1] font-bold">{member.monthlyVisits}</span> visitas
+                    </span>
+                  </div>
+                </div>
+
+                {/* Expanded Details — ancho completo del contenedor */}
+                {isExpanded && (
+                  <div className="w-full min-w-0 bg-[#0e0e0e] border-b border-[rgba(93,63,60,0.12)] border-l-2 border-l-[#e31e24] p-4 sm:p-6 lg:p-8 space-y-6">
+                    <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full">
                       <button
                         type="button"
                         onClick={() => openPaymentModal(member)}
@@ -909,7 +1093,7 @@ export default function Members() {
                         Vender en tienda
                       </button>
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded border border-[rgba(93,63,60,0.12)] bg-[#0e0e0e] px-4 py-3">
+                    <div className="w-full flex flex-wrap items-center gap-x-4 gap-y-2 rounded border border-[rgba(93,63,60,0.12)] bg-[#131313] px-4 py-3">
                       <span className="text-[#808080] text-[9px] font-bold uppercase tracking-wide shrink-0">
                         Canal principal
                       </span>
@@ -935,39 +1119,48 @@ export default function Members() {
                         <span className="text-[#5a5a5a] text-[10px]">Sin correo registrado</span>
                       )}
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-                      {/* Tier Recognition */}
-                      <div className="bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-6">
+                    <div className="w-full grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6">
+                      {/* Suscripción / vigencia */}
+                      <div className="w-full min-w-0 bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-5 sm:p-6">
                         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] mb-2">
-                          TIER_RECOGNITION
+                          SUSCRIPCIÓN
                         </p>
-                        <h2 className="text-white text-[30px] font-black mb-2">{member.tier}</h2>
-                        <p className="text-[#e7bdb8] text-[12px] mb-6">
-                          {member.tier === "ELITE_BLK" && "Full access to technical recovery and high-impact zones."}
-                          {member.tier === "PLATINUM_ELITE" && "Premium access to all facilities and priority support."}
-                          {member.tier === "GOLD" && "Extended hours and group class access."}
-                          {member.tier === "BASIC" && "Standard gym access during regular hours."}
+                        <h2 className="text-white text-[26px] sm:text-[30px] font-black mb-1 leading-tight">
+                          {getExpiryMeta(member.renewalDate).label}
+                        </h2>
+                        <p className="text-[#e7bdb8] text-[12px] mb-5">
+                          Acceso por tiempo · periodo de {subscriptionPeriodDays(member)} días
                         </p>
-                        <div className="pt-4 border-t border-[rgba(93,63,60,0.1)]">
-                          <p className="text-[#393939] text-[9px] font-bold mb-1">RENEWAL_DATE</p>
-                          <p className="text-white text-[14px] font-black uppercase">
-                            {new Date(member.renewalDate).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric'
-                            }).replace(/,/g, '_').replace(/ /g, '_').toUpperCase()}
+                        {memberPlanLabel(member.tier) && (
+                          <p className="text-[#808080] text-[11px] mb-4">
+                            Plan contratado:{" "}
+                            <span className="text-[#e5e2e1] font-bold">{memberPlanLabel(member.tier)}</span>
                           </p>
+                        )}
+                        <div className="grid grid-cols-2 gap-3 pt-4 border-t border-[rgba(93,63,60,0.1)]">
+                          <div>
+                            <p className="text-[#393939] text-[9px] font-bold mb-1">INICIO</p>
+                            <p className="text-white text-[13px] font-black">
+                              {formatRenewalDate(member.enrollmentDate)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[#393939] text-[9px] font-bold mb-1">VENCE</p>
+                            <p className="text-white text-[13px] font-black">
+                              {formatRenewalDate(member.renewalDate)}
+                            </p>
+                          </div>
                         </div>
                         <div className="pt-4 mt-3 border-t border-[rgba(93,63,60,0.08)]">
                           <p className="text-[#e31e24] text-[9px] font-bold tracking-[1.5px] uppercase mb-3">
-                            Vigencia · expiración
+                            Estado de vigencia
                           </p>
-                          <MemberExpiryIndicator member={member} />
+                          <MemberExpiryIndicator member={member} layout="twoRow" />
                         </div>
                       </div>
 
                       {/* Biometric Enrollment */}
-                      <div className="bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-6">
+                      <div className="w-full min-w-0 bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-5 sm:p-6">
                         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] mb-4">
                           SEC_ENROLLMENT
                         </p>
@@ -1009,7 +1202,7 @@ export default function Members() {
                       </div>
 
                       {/* Activity Stats */}
-                      <div className="bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-6">
+                      <div className="w-full min-w-0 bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-5 sm:p-6 md:col-span-2 xl:col-span-1">
                         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
                           Activity_Stats
                         </p>
@@ -1036,9 +1229,9 @@ export default function Members() {
                     </div>
 
                     {(member.address || member.idDocumentDataUrl) && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+                      <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
                         {member.address && (
-                          <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-5">
+                          <div className="w-full min-w-0 bg-[#131313] border border-[rgba(93,63,60,0.1)] p-5">
                             <p className="flex items-center gap-2 text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-3">
                               <MapPin size={14} />
                               Domicilio
@@ -1049,7 +1242,7 @@ export default function Members() {
                           </div>
                         )}
                         {member.idDocumentDataUrl && (
-                          <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-5">
+                          <div className="w-full min-w-0 bg-[#131313] border border-[rgba(93,63,60,0.1)] p-5">
                             <p className="flex items-center gap-2 text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-3">
                               <IdCard size={14} />
                               ID · expediente
@@ -1075,7 +1268,7 @@ export default function Members() {
                     )}
 
                     {/* Payment history — demo store */}
-                    <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 md:p-6">
+                    <div className="w-full min-w-0 bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 sm:p-6">
                       <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
                         Historial de pagos (membresía)
                       </p>
@@ -1114,7 +1307,8 @@ export default function Members() {
                   </div>
                 )}
               </div>
-            ))
+            );
+            })
           )}
         </div>
 
@@ -1503,37 +1697,42 @@ export default function Members() {
               </div>
               </div>
 
-              {/* Columna: membresía, fechas y acceso */}
+              {/* Columna: suscripción, fechas y acceso */}
               <div className="flex min-w-0 flex-col gap-4 border-[rgba(93,63,60,0.08)] lg:gap-5 lg:border-l lg:pl-8 xl:pl-12">
-              <div className="min-w-0">
-                <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                  Plan de membresía
-                </label>
-                <select
-                  value={newMemberForm.planID || ""}
-                  onChange={(e) => {
-                    const planID = Number(e.target.value);
-                    setNewMemberForm((f) => ({
-                      ...f,
-                      planID,
-                      renewalDate: applyPlanToRenewal(planID, f.enrollmentDate),
-                    }));
-                  }}
-                  disabled={plansLoading || membershipPlans.length === 0}
-                  className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px] disabled:opacity-50"
-                  required
-                >
-                  {membershipPlans.length === 0 ? (
-                    <option value="">Sin planes — cree uno en Planes</option>
-                  ) : (
-                    membershipPlans.map((p) => (
-                      <option key={p.planID} value={p.planID}>
-                        {p.planName} ({p.validityMonths}{" "}
-                        {p.validityMonths === 1 ? "mes" : "meses"})
-                      </option>
-                    ))
-                  )}
-                </select>
+              <div>
+                <p className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                  Periodo de vigencia
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {SUBSCRIPTION_PERIOD_OPTIONS.map(({ key, label, period }) => {
+                    const active = newMemberForm.selectedPeriodKey === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          const { renewalDate, cost } = applySubscriptionPeriod(
+                            newMemberForm.enrollmentDate,
+                            key,
+                          );
+                          setNewMemberForm((f) => ({
+                            ...f,
+                            selectedPeriodKey: key,
+                            renewalDate,
+                            subscriptionCost: cost,
+                          }));
+                        }}
+                        className={`px-3 py-2 text-[10px] font-bold uppercase tracking-wide border transition-colors ${
+                          active
+                            ? "bg-[#e31e24]/15 border-[#e31e24]/50 text-white"
+                            : "bg-[#0e0e0e] border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24] hover:text-white"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-4 min-w-0">
@@ -1546,16 +1745,18 @@ export default function Members() {
                     value={newMemberForm.enrollmentDate}
                     onChange={(e) => {
                       const ed = e.target.value;
-                      setNewMemberForm((f) => ({
-                        ...f,
-                        enrollmentDate: ed,
-                        renewalDate: clampRenewalDate(
+                      setNewMemberForm((f) => {
+                        const { renewalDate, cost } = applySubscriptionPeriod(
                           ed,
-                          f.planID
-                            ? applyPlanToRenewal(f.planID, ed)
-                            : f.renewalDate,
-                        ),
-                      }));
+                          f.selectedPeriodKey,
+                        );
+                        return {
+                          ...f,
+                          enrollmentDate: ed,
+                          renewalDate: clampRenewalDate(ed, renewalDate),
+                          subscriptionCost: cost,
+                        };
+                      });
                     }}
                     className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-3 sm:px-4 focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px] [color-scheme:dark]"
                     required
@@ -1574,6 +1775,7 @@ export default function Members() {
                       setNewMemberForm((f) => ({
                         ...f,
                         renewalDate: clampRenewalDate(f.enrollmentDate, e.target.value),
+                        selectedPeriodKey: null,
                       }))
                     }
                     className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-3 sm:px-4 focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px] [color-scheme:dark]"
@@ -1585,36 +1787,75 @@ export default function Members() {
                 </div>
               </div>
 
-              <div>
-                <p className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                  Duración del periodo (hasta renovación)
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {(
-                    [
-                      { key: "1d", label: "1 día", period: { days: 1 } },
-                      { key: "1w", label: "1 semana", period: { weeks: 1 } },
-                      { key: "1m", label: "1 mes", period: { months: 1 } },
-                      { key: "3m", label: "3 meses", period: { months: 3 } },
-                      { key: "6m", label: "6 meses", period: { months: 6 } },
-                      { key: "12m", label: "12 meses", period: { months: 12 } },
-                    ] as const
-                  ).map(({ key, label, period }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() =>
+              <div className="min-w-0 rounded-sm bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4 space-y-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Wallet size={16} className="text-[#e31e24] shrink-0" />
+                  <p className="text-[#e5e2e1] text-[12px] font-bold uppercase tracking-wide">
+                    Pago de suscripción
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                    Costo de suscripción (MXN)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={newMemberForm.subscriptionCost}
+                    onChange={(e) =>
+                      setNewMemberForm((f) => ({
+                        ...f,
+                        subscriptionCost: e.target.value,
+                        selectedPeriodKey: null,
+                      }))
+                    }
+                    className="w-full min-w-0 max-w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none text-[14px] font-bold tabular-nums"
+                    required
+                  />
+                  <p className="text-[#393939] text-[9px] mt-1.5">
+                    Se llena al elegir un periodo; puedes ajustarlo manualmente.
+                  </p>
+                </div>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newMemberForm.payNow}
+                    onChange={(e) =>
+                      setNewMemberForm((f) => ({ ...f, payNow: e.target.checked }))
+                    }
+                    className="mt-1 w-4 h-4 accent-[#e31e24] rounded border-[rgba(93,63,60,0.4)]"
+                  />
+                  <div>
+                    <span className="text-[#e5e2e1] text-[12px] font-bold">
+                      Registrar pago al guardar
+                    </span>
+                    <p className="text-[#808080] text-[10px] mt-1 leading-relaxed">
+                      Cobra la suscripción en el mismo paso del alta del miembro.
+                    </p>
+                  </div>
+                </label>
+                {newMemberForm.payNow && (
+                  <div>
+                    <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                      Método de pago
+                    </label>
+                    <select
+                      value={newMemberForm.paymentMethod}
+                      onChange={(e) =>
                         setNewMemberForm((f) => ({
                           ...f,
-                          renewalDate: renewalAfterPeriod(f.enrollmentDate, period),
+                          paymentMethod: e.target.value as typeof f.paymentMethod,
                         }))
                       }
-                      className="px-3 py-2 text-[10px] font-bold uppercase tracking-wide bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24] hover:text-white transition-colors"
+                      className="w-full min-w-0 max-w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none text-[13px]"
                     >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+                      <option value="CASH">Efectivo</option>
+                      <option value="CARD">Tarjeta</option>
+                      <option value="QR">QR / transferencia</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="min-w-0 overflow-hidden rounded-sm bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4 space-y-3">
@@ -1672,7 +1913,7 @@ export default function Members() {
                   className="min-h-[44px] w-full sm:flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {savingNewMember ? <Loader2 className="animate-spin" size={16} /> : null}
-                  Guardar miembro
+                  {newMemberForm.payNow ? "Guardar y cobrar" : "Guardar miembro"}
                 </button>
               </div>
             </form>

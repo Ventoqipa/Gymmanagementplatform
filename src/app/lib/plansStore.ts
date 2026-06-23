@@ -42,3 +42,36 @@ export function renewalDateFromPlan(
   d.setMonth(d.getMonth() + months);
   return d.toISOString().slice(0, 10);
 }
+
+/** Precios de suscripción por periodo de vigencia (localStorage). */
+export type SubscriptionPeriodKey = "1d" | "1w" | "1m" | "3m" | "6m" | "12m";
+
+const SUBSCRIPTION_PRICES_KEY = "elite_gym_v1_subscription_prices";
+
+const DEFAULT_SUBSCRIPTION_PRICES: Record<SubscriptionPeriodKey, number> = {
+  "1d": 80,
+  "1w": 350,
+  "1m": 899,
+  "3m": 2499,
+  "6m": 4499,
+  "12m": 7999,
+};
+
+export function loadSubscriptionPrices(): Record<SubscriptionPeriodKey, number> {
+  const saved = loadJson<Partial<Record<SubscriptionPeriodKey, number>>>(
+    SUBSCRIPTION_PRICES_KEY,
+    {},
+  );
+  return { ...DEFAULT_SUBSCRIPTION_PRICES, ...saved };
+}
+
+export function getSubscriptionPrice(key: SubscriptionPeriodKey): number {
+  return loadSubscriptionPrices()[key];
+}
+
+export function saveSubscriptionPrices(
+  prices: Partial<Record<SubscriptionPeriodKey, number>>,
+): void {
+  const current = loadSubscriptionPrices();
+  saveJson(SUBSCRIPTION_PRICES_KEY, { ...current, ...prices });
+}
