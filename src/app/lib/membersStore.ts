@@ -13,6 +13,7 @@ export type Member = {
   avgSessionTime: number;
   email?: string;
   phone: string;
+  emergencyPhone?: string;
   address?: string;
   idDocumentDataUrl?: string;
   faceIdEnrolled?: boolean;

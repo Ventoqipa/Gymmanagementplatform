@@ -6,6 +6,7 @@ import {
   buildPhotoClientIdFileName,
   dataUrlToBase64,
 } from "./utils/clientPhoto";
+import { encodeEmergencyPhone } from "./utils/emergencyPhone";
 import type {
   AddClientInput,
   CatalogClient,
@@ -95,7 +96,11 @@ export function buildClientPayload(
     curp: "-",
     fullName,
     firstName,
-    middleName: "-",
+    middleName:
+      encodeEmergencyPhone(
+        input.emergencyPhoneCodeNumber ?? "",
+        input.emergencyPhoneNumber ?? "",
+      ) ?? "-",
     lastName,
 
     countryID: catalogConfig.defaults.countryId,

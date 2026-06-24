@@ -12,10 +12,10 @@ import {
 } from "../lib/exportPosReport";
 import { computeTopProducts } from "../lib/platformStats";
 import {
+  localDateIso,
   MEMBERSHIP_CONCEPT,
   PAYMENT_METHOD,
   startOfMonthIso,
-  todayIso,
 } from "../lib/labels";
 
 type TabId = "products" | "subscriptions";
@@ -49,8 +49,8 @@ function ExportTableButton({
 
 export default function Reports() {
   const [tab, setTab] = useState<TabId>("products");
-  const [dateFrom, setDateFrom] = useState(startOfMonthIso);
-  const [dateTo, setDateTo] = useState(todayIso);
+  const [dateFrom, setDateFrom] = useState(() => startOfMonthIso());
+  const [dateTo, setDateTo] = useState(() => localDateIso());
   const [loading, setLoading] = useState(true);
   const [productSales, setProductSales] = useState<PosSale[]>([]);
   const [subscriptionSales, setSubscriptionSales] = useState<PosSale[]>([]);
@@ -101,7 +101,7 @@ export default function Reports() {
   const activeList = tab === "products" ? productSales : subscriptionSales;
 
   const setTodayRange = () => {
-    const today = todayIso();
+    const today = localDateIso(new Date());
     setDateFrom(today);
     setDateTo(today);
   };
@@ -156,7 +156,7 @@ export default function Reports() {
             Reportes
           </h1>
           <p className="text-[#808080] text-[11px] mt-1 max-w-2xl">
-            Ventas de productos y cobros de suscripciones desde el POS API, filtrados por rango de fechas.
+            Ventas de productos y cobros de suscripciones.
           </p>
         </div>
         <button

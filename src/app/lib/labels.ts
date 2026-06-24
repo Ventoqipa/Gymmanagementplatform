@@ -35,13 +35,35 @@ export const PRODUCT_CATEGORY: Record<string, string> = {
   ACCESSORIES: "Accesorios",
 };
 
+/** YYYY-MM-DD en zona horaria local del navegador (nunca UTC). */
+export function localDateIso(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
 export function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDateIso(new Date());
 }
 
 export function startOfMonthIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Inicio/fin del día local como ISO UTC (ventas del API guardan dateIso en UTC). */
+export function localDayStartUtcIso(dateOnly: string): string {
+  if (!DATE_ONLY_RE.test(dateOnly)) return dateOnly;
+  return new Date(`${dateOnly}T00:00:00`).toISOString();
+}
+
+export function localDayEndUtcIso(dateOnly: string): string {
+  if (!DATE_ONLY_RE.test(dateOnly)) return dateOnly;
+  return new Date(`${dateOnly}T23:59:59.999`).toISOString();
 }
 
 export function isIsoInRange(iso: string, fromDate: string, toDate: string): boolean {

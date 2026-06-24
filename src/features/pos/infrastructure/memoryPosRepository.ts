@@ -11,6 +11,7 @@ import type {
   SubscriptionCheckoutInput,
   UpdateProductInput,
 } from "../domain/types";
+import { todayIso } from "@/app/lib/labels";
 import type { PosRepository } from "../application/posRepository";
 import type { LocalPosStorage } from "./localPosStorage";
 
@@ -221,9 +222,8 @@ export class MemoryPosRepository implements PosRepository {
   }
 
   async listSalesToday(): Promise<PosSale[]> {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    return this.listSales({ from: start.toISOString().slice(0, 10) });
+    const today = todayIso();
+    return this.listSales({ from: today, to: today });
   }
 }
 

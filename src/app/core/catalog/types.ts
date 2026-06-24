@@ -57,6 +57,8 @@ export type AddClientInput = {
   email?: string;
   phoneNumber: string;
   phoneCodeNumber: string;
+  emergencyPhoneNumber?: string;
+  emergencyPhoneCodeNumber?: string;
   fullAddress?: string;
   planID: number;
   enrollmentDate: string;

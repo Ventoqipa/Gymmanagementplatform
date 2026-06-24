@@ -18,6 +18,7 @@ import {
   IdCard,
   MapPin,
   MessageCircle,
+  Phone,
 } from "lucide-react";
 import { toast } from "sonner";
 import { addClientUseCase, listClientsUseCase } from "../core/catalog";
@@ -359,6 +360,7 @@ const emptyNewMemberForm = () => {
     email: "",
     phoneCountryDial: "52",
     phoneNational: "",
+    emergencyPhoneNational: "",
     planID: DEFAULT_MEMBER_PLAN_ID,
     selectedPeriodKey: defaultPeriod as SubscriptionPeriodKey | null,
     subscriptionCost: cost,
@@ -768,6 +770,14 @@ export default function Members() {
       return;
     }
     const addressTrim = newMemberForm.address.trim();
+    const emergencyNational = newMemberForm.emergencyPhoneNational.trim().replace(/\s+/g, " ");
+    if (emergencyNational) {
+      const emergencyDigits = normalizePhoneDigits(emergencyNational);
+      if (emergencyDigits.length < 10) {
+        toast.error("El teléfono de emergencia parece incompleto.");
+        return;
+      }
+    }
     setSavingNewMember(true);
 
     try {
@@ -777,6 +787,8 @@ export default function Members() {
         email: emailNorm || undefined,
         phoneNumber: phoneForApi,
         phoneCodeNumber: dial,
+        emergencyPhoneNumber: emergencyNational || undefined,
+        emergencyPhoneCodeNumber: emergencyNational ? dial : undefined,
         fullAddress: addressTrim || undefined,
         planID: DEFAULT_MEMBER_PLAN_ID,
         enrollmentDate: newMemberForm.enrollmentDate,
@@ -792,9 +804,13 @@ export default function Members() {
       }
 
       let row = apiResult.member;
+      const emergencyDisplay = emergencyNational
+        ? `+${dial} ${emergencyNational}`.replace(/\s+$/, "")
+        : undefined;
       row = {
         ...row,
         phone: phoneDisplay,
+        ...(emergencyDisplay ? { emergencyPhone: emergencyDisplay } : {}),
         ...(newMemberForm.idDocumentDataUrl
           ? { idDocumentDataUrl: newMemberForm.idDocumentDataUrl }
           : {}),
@@ -1164,6 +1180,11 @@ export default function Members() {
                       ) : (
                         <span className="text-[#5a5a5a] text-[10px]">Sin correo registrado</span>
                       )}
+                      {member.emergencyPhone ? (
+                        <span className="text-[#808080] text-[11px] min-w-0 truncate" title={member.emergencyPhone}>
+                          Emergencia: {member.emergencyPhone}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="w-full grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6">
                       {/* Suscripción / vigencia */}
@@ -1644,6 +1665,34 @@ export default function Members() {
                         placeholder="55 1234 5678"
                         className="min-w-0 flex-1 box-border border border-[rgba(93,63,60,0.2)] bg-[#0e0e0e] px-4 py-3 font-['Space_Grotesk',sans-serif] text-[#e5e2e1] focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px]"
                         required
+                      />
+                    </div>
+                  </div>
+                  <div className="min-w-0 xl:col-span-2">
+                    <label className="flex items-center gap-2 text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                      <Phone size={12} className="text-[#e31e24] shrink-0" />
+                      Teléfono de emergencia{" "}
+                      <span className="font-normal normal-case text-[#5a5a5a]">(opcional)</span>
+                    </label>
+                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-stretch">
+                      <div className="w-full shrink-0 sm:w-[5.25rem]">
+                        <div className="flex h-full min-h-[46px] w-full items-center justify-center border border-[rgba(93,63,60,0.2)] bg-[#131313] px-2.5 py-3 font-mono text-[#808080] text-[13px] sm:text-[14px]">
+                          +{newMemberForm.phoneCountryDial}
+                        </div>
+                      </div>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        autoComplete="tel-national"
+                        value={newMemberForm.emergencyPhoneNational}
+                        onChange={(e) =>
+                          setNewMemberForm({
+                            ...newMemberForm,
+                            emergencyPhoneNational: e.target.value,
+                          })
+                        }
+                        placeholder="Contacto de emergencia"
+                        className="min-w-0 flex-1 box-border border border-[rgba(93,63,60,0.2)] bg-[#0e0e0e] px-4 py-3 font-['Space_Grotesk',sans-serif] text-[#e5e2e1] focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px]"
                       />
                     </div>
                   </div>

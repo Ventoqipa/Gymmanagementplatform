@@ -1,5 +1,6 @@
 import type { Member } from "../../../lib/membersStore";
 import type { CatalogClient } from "../types";
+import { decodeEmergencyPhone } from "../utils/emergencyPhone";
 
 function isoDatePart(value?: string | null): string {
   if (!value) return new Date().toISOString().slice(0, 10);
@@ -66,6 +67,7 @@ export function clientToMember(
         ? client.email.trim()
         : undefined,
     phone,
+    emergencyPhone: decodeEmergencyPhone(client.middleName),
     address,
     faceIdEnrolled: undefined,
   };

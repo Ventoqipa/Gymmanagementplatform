@@ -12,6 +12,10 @@ import type {
   UpdateProductInput,
 } from "../domain/types";
 import { filterSalesByType, normalizePosSale, resolveTransactionType } from "../domain/filterSales";
+import {
+  localDayEndUtcIso,
+  localDayStartUtcIso,
+} from "@/app/lib/labels";
 import type { PosRepository } from "../application/posRepository";
 
 type CheckoutApiResponse = {
@@ -120,8 +124,8 @@ export class RestPosRepository implements PosRepository {
     type?: PosTransactionType;
   }): Promise<PosSale[]> {
     const query: Record<string, string> = {};
-    if (params?.from) query.from = params.from;
-    if (params?.to) query.to = params.to;
+    if (params?.from) query.from = localDayStartUtcIso(params.from);
+    if (params?.to) query.to = localDayEndUtcIso(params.to);
     if (params?.type) query.type = params.type;
     const rows = await posGet<PosSale[]>(this.config, POS_API_PATHS.sales, query);
     return rows.map(normalizePosSale).filter((sale) => {
