@@ -21,7 +21,8 @@ export async function listClientsUseCase(): Promise<ListClientsResult> {
 
   try {
     const clients = await fetchClientsList(companyId, branchId);
-    return { ok: true, members: clientsToMembers(clients) };
+    const members = clientsToMembers(clients);
+    return { ok: true, members: members.slice().reverse() };
   } catch (error) {
     if (error instanceof CatalogApiError) {
       return { ok: false, message: error.message, statusCode: error.statusCode };

@@ -1,22 +1,25 @@
-import { getSessionUserId } from "../auth/authStorage";
 import { catalogConfig, catalogUrl } from "../../config/catalog";
 import { catalogRequest } from "./catalogApiClient";
 import { mapListItemsToCatalogClients } from "./mappers/clientListMapper";
-import {
-  buildPhotoClientIdFileName,
-  dataUrlToBase64,
-} from "./utils/clientPhoto";
-import { encodeEmergencyPhone } from "./utils/emergencyPhone";
+import { dataUrlToBase64, dataUrlToExtension } from "./utils/clientPhoto";
 import type {
   AddClientInput,
   CatalogClient,
   CatalogClientListData,
   CatalogClientListItem,
+  CatalogClientWritePayload,
   UpdateClientInput,
 } from "./types";
 
 function toIsoDateTime(dateIso: string): string {
   return new Date(`${dateIso}T12:00:00`).toISOString();
+}
+
+/** Vencimiento: último día del mes de la fecha de renovación. */
+function expirationFromRenewalIso(renewalDateIso: string): string {
+  const d = new Date(`${renewalDateIso}T12:00:00`);
+  d.setMonth(d.getMonth() + 1, 0);
+  return toIsoDateTime(d.toISOString().slice(0, 10));
 }
 
 function dashStr(value?: string | null): string {
@@ -26,6 +29,11 @@ function dashStr(value?: string | null): string {
 
 function buildFullName(firstName: string, lastName: string): string {
   return `${firstName.trim()} ${lastName.trim()}`.trim();
+}
+
+function formatPhoneCode(phoneCodeNumber: string): string {
+  const digits = phoneCodeNumber.trim().replace(/\D/g, "");
+  return digits ? `+${digits}` : "-";
 }
 
 function nationalPhoneNumber(phoneNumber: string, phoneCodeNumber: string): string {
@@ -41,53 +49,46 @@ export type BuildClientScope = {
   companyId: number;
   branchId: number;
   clientId?: number;
-  mode?: "add" | "update";
-  existing?: Pick<
-    CatalogClient,
-    "userAdded" | "dateAdded" | "userEdited" | "dateEdited"
-  >;
 };
 
 /**
  * JSON Client para POST /Add y PUT /Update.
- * Solo valores del formulario; el resto "-" (string) o 0 (numérico requerido).
+ * DocFileName vacío/nulo (lo genera el API); teléfono de emergencia en campos dedicados.
  */
 export function buildClientPayload(
   input: AddClientInput,
   scope: BuildClientScope,
-): CatalogClient {
-  const isAdd = scope.mode !== "update";
+): CatalogClientWritePayload {
   const clientId = scope.clientId ?? 0;
-  const nowIso = new Date().toISOString();
-  const sessionUserId = getSessionUserId() || "-";
 
   const firstName = input.firstName.trim().slice(0, 50);
   const lastName = input.lastName.trim().slice(0, 50);
   const email = input.email?.trim();
-  const phoneCode = input.phoneCodeNumber.trim().replace(/\D/g, "").slice(0, 5);
-  const phone = nationalPhoneNumber(input.phoneNumber, phoneCode);
+  const phoneCode = formatPhoneCode(input.phoneCodeNumber);
+  const phone = nationalPhoneNumber(input.phoneNumber, input.phoneCodeNumber);
   const fullName = buildFullName(firstName, lastName);
   const fullAddress = dashStr(input.fullAddress);
 
-  const dateAdded = isAdd ? nowIso : scope.existing?.dateAdded ?? nowIso;
-  const userAdded = isAdd ? sessionUserId : scope.existing?.userAdded ?? sessionUserId;
+  const emergencyNationalRaw = input.emergencyPhoneNumber?.trim() ?? "";
+  const emergencyNational = emergencyNationalRaw
+    ? nationalPhoneNumber(
+        emergencyNationalRaw,
+        input.emergencyPhoneCodeNumber ?? input.phoneCodeNumber,
+      )
+    : "";
+  const emergencyCode = emergencyNational
+    ? formatPhoneCode(input.emergencyPhoneCodeNumber ?? input.phoneCodeNumber)
+    : "-";
 
   const hasPhoto = Boolean(input.idDocumentDataUrl?.trim());
-  const photoFileName = hasPhoto
-    ? buildPhotoClientIdFileName(fullName, input.enrollmentDate)
+  const docExtension = hasPhoto
+    ? dataUrlToExtension(input.idDocumentDataUrl!)
     : "-";
-  const photoBase64 = hasPhoto
-    ? dataUrlToBase64(input.idDocumentDataUrl!)
-    : "-";
+  const docBase64 = hasPhoto ? dataUrlToBase64(input.idDocumentDataUrl!) : "-";
+
+  const renewalIso = toIsoDateTime(input.renewalDate);
 
   return {
-    isEnabled: true,
-    isNew: isAdd,
-    userAdded,
-    dateAdded,
-    userEdited: sessionUserId,
-    dateEdited: nowIso,
-
     clientID: clientId,
     companyID: scope.companyId,
     branchID: scope.branchId,
@@ -96,11 +97,7 @@ export function buildClientPayload(
     curp: "-",
     fullName,
     firstName,
-    middleName:
-      encodeEmergencyPhone(
-        input.emergencyPhoneCodeNumber ?? "",
-        input.emergencyPhoneNumber ?? "",
-      ) ?? "-",
+    middleName: "-",
     lastName,
 
     countryID: catalogConfig.defaults.countryId,
@@ -108,18 +105,22 @@ export function buildClientPayload(
     municipalityID: catalogConfig.defaults.municipalityId,
 
     email: dashStr(email),
+    phoneCodeNumber: phoneCode,
     phoneNumber: phone,
-    phoneCodeNumber: phoneCode || "-",
-
-    photoClientIDFileName: photoFileName,
-    photoClientIDBase64: photoBase64,
+    phoneCodeNumberEmergency: emergencyCode,
+    phoneNumberEmergency: emergencyNational || "-",
 
     statusID: catalogConfig.defaults.statusId,
     fullAddress,
 
     planID: input.planID,
-    enrollment: toIsoDateTime(input.enrollmentDate),
-    renewal: toIsoDateTime(input.renewalDate),
+    DateEnrollment: toIsoDateTime(input.enrollmentDate),
+    DateRenewal: renewalIso,
+    DateExpiration: expirationFromRenewalIso(input.renewalDate),
+
+    DocFileName: null,
+    DocExtensionName: docExtension,
+    DocBase64: docBase64,
   };
 }
 
@@ -128,7 +129,7 @@ function isCatalogClient(value: unknown): value is CatalogClient {
     value !== null &&
     typeof value === "object" &&
     "clientID" in value &&
-    "planID" in value
+    ("planID" in value || "DateEnrollment" in value || "enrollment" in value)
   );
 }
 
@@ -188,7 +189,7 @@ export async function fetchClientById(clientId: number): Promise<CatalogClient> 
 }
 
 export async function postClientAdd(
-  payload: CatalogClient,
+  payload: CatalogClientWritePayload,
 ): Promise<CatalogClient> {
   const data = await catalogRequest<CatalogClient | unknown>({
     method: "POST",
@@ -202,7 +203,7 @@ export async function postClientAdd(
 }
 
 export async function putClientUpdate(
-  payload: CatalogClient,
+  payload: CatalogClientWritePayload,
 ): Promise<CatalogClient> {
   const data = await catalogRequest<CatalogClient | unknown>({
     method: "PUT",
@@ -224,13 +225,11 @@ export async function deleteClientById(clientId: number): Promise<void> {
 
 export function buildUpdatePayload(
   input: UpdateClientInput,
-  scope: { companyId: number; branchId: number; existing?: CatalogClient },
-): CatalogClient {
+  scope: { companyId: number; branchId: number },
+): CatalogClientWritePayload {
   return buildClientPayload(input, {
     companyId: scope.companyId,
     branchId: scope.branchId,
     clientId: input.clientID,
-    mode: "update",
-    existing: scope.existing,
   });
 }

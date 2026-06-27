@@ -24,10 +24,10 @@ export const catalogConfig = {
     planDelete: (planId: number) => `/api/eg/Catalogs/Plan/Delete/${planId}`,
   },
   defaults: {
-    countryId: Number(import.meta.env.VITE_CATALOG_DEFAULT_COUNTRY_ID ?? "1") || 1,
-    stateId: Number(import.meta.env.VITE_CATALOG_DEFAULT_STATE_ID ?? "1") || 1,
+    countryId: Number(import.meta.env.VITE_CATALOG_DEFAULT_COUNTRY_ID ?? "117") || 117,
+    stateId: Number(import.meta.env.VITE_CATALOG_DEFAULT_STATE_ID ?? "25") || 25,
     municipalityId:
-      Number(import.meta.env.VITE_CATALOG_DEFAULT_MUNICIPALITY_ID ?? "1") || 1,
+      Number(import.meta.env.VITE_CATALOG_DEFAULT_MUNICIPALITY_ID ?? "23") || 23,
     statusId: Number(import.meta.env.VITE_CATALOG_DEFAULT_STATUS_ID ?? "1") || 1,
     photoPlaceholder:
       (import.meta.env.VITE_CATALOG_PHOTO_PLACEHOLDER ?? "sin-identificacion.jpg").trim(),

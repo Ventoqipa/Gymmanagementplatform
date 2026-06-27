@@ -71,15 +71,17 @@ export function mapListItemToCatalogClient(
     phoneNumber: `555100${phoneSuffix}`,
     phoneCodeNumber: "52",
 
-    photoClientIDFileName: "-",
-    photoClientIDBase64: "-",
-
     statusID: catalogConfig.defaults.statusId,
     fullAddress: "-",
 
     planID: 0,
-    enrollment: mockEnrollmentIso(clientId),
-    renewal: mockRenewalIso(clientId),
+    DateEnrollment: mockEnrollmentIso(clientId),
+    DateRenewal: mockRenewalIso(clientId),
+    phoneCodeNumberEmergency: "-",
+    phoneNumberEmergency: "-",
+    DocFileName: null,
+    DocExtensionName: "-",
+    DocBase64: "-",
   };
 }
 

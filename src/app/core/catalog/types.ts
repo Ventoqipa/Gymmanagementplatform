@@ -1,32 +1,50 @@
-export type CatalogClient = {
-  isEnabled: boolean;
-  isNew: boolean;
-  userAdded: string | null;
-  dateAdded: string | null;
-  userEdited: string | null;
-  dateEdited: string | null;
+/** Cuerpo POST /Add y PUT /Update (contrato catálogo Client). */
+export type CatalogClientWritePayload = {
   clientID: number;
   companyID: number;
   branchID: number;
-  rfc: string | null;
-  curp: string | null;
-  fullName: string | null;
-  firstName: string | null;
-  middleName: string | null;
-  lastName: string | null;
+  rfc: string;
+  curp: string;
+  fullName: string;
+  firstName: string;
+  middleName: string;
+  lastName: string;
   countryID: number;
   stateID: number;
   municipalityID: number;
-  email: string | null;
-  phoneNumber: string | null;
-  phoneCodeNumber: string | null;
-  photoClientIDFileName: string | null;
-  photoClientIDBase64: string | null;
+  email: string;
+  phoneCodeNumber: string;
+  phoneNumber: string;
+  phoneCodeNumberEmergency: string;
+  phoneNumberEmergency: string;
   statusID: number;
-  fullAddress: string | null;
+  fullAddress: string;
   planID: number;
-  enrollment: string;
-  renewal: string | null;
+  DateEnrollment: string;
+  DateRenewal: string;
+  DateExpiration: string;
+  DocFileName: string | null;
+  DocExtensionName: string;
+  DocBase64: string;
+};
+
+/** Respuesta GET / listado (acepta nombres legacy y actuales). */
+export type CatalogClient = Partial<CatalogClientWritePayload> & {
+  isEnabled?: boolean;
+  isNew?: boolean;
+  userAdded?: string | null;
+  dateAdded?: string | null;
+  userEdited?: string | null;
+  dateEdited?: string | null;
+  clientID: number;
+  companyID?: number;
+  branchID?: number;
+  planID?: number;
+  /** Legacy */
+  enrollment?: string;
+  renewal?: string | null;
+  photoClientIDFileName?: string | null;
+  photoClientIDBase64?: string | null;
 };
 
 export type CatalogPlan = {

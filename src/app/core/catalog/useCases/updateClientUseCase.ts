@@ -29,7 +29,6 @@ export async function updateClientUseCase(
     const payload = buildUpdatePayload(input, {
       companyId,
       branchId,
-      existing: undefined,
     });
     const updated = await putClientUpdate(payload);
     return { ok: true, member: clientToMember(updated) };

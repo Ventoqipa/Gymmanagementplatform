@@ -13,3 +13,12 @@ export function dataUrlToBase64(dataUrl: string): string {
   const comma = dataUrl.indexOf(",");
   return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
 }
+
+/** Extensión del archivo a partir del data URL (p. ej. `.png`). */
+export function dataUrlToExtension(dataUrl: string): string {
+  const match = dataUrl.match(/^data:image\/(\w+);/i);
+  if (!match) return ".png";
+  const ext = match[1].toLowerCase();
+  if (ext === "jpeg") return ".jpg";
+  return `.${ext}`;
+}
