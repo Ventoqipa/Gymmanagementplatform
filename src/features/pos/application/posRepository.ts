@@ -8,7 +8,6 @@ import type {
   SubscriptionCheckoutInput,
   UpdateProductInput,
 } from "../domain/types";
-import type { PosRepository } from "../application/posRepository";
 
 export interface PosRepository {
   listProducts(params?: {
@@ -23,7 +22,10 @@ export interface PosRepository {
     receipt: PosTicketReceipt;
     products: PosProduct[];
   }>;
-  checkoutSubscription(input: SubscriptionCheckoutInput): Promise<{ sale: PosSale }>;
+  checkoutSubscription(input: SubscriptionCheckoutInput): Promise<{
+    sale: PosSale;
+    receipt: PosTicketReceipt;
+  }>;
   listSales(params?: {
     from?: string;
     to?: string;

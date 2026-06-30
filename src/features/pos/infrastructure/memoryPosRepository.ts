@@ -1,3 +1,4 @@
+import { buildSubscriptionReceipt } from "../domain/subscriptionReceipt";
 import { calcTotals, IVA_REGIMEN_LABEL } from "../domain/tax";
 import { filterSalesByType } from "../domain/filterSales";
 import { generateProductSku } from "../domain/productId";
@@ -167,7 +168,7 @@ export class MemoryPosRepository implements PosRepository {
 
   async checkoutSubscription(
     input: SubscriptionCheckoutInput,
-  ): Promise<{ sale: PosSale }> {
+  ): Promise<{ sale: PosSale; receipt: PosTicketReceipt }> {
     const ticketId = `TKT-${Date.now().toString(36).toUpperCase()}`;
     const concept = input.concept ?? "MEMBERSHIP";
     const periodSuffix = input.periodKey ? ` · ${input.periodKey}` : "";
@@ -175,6 +176,7 @@ export class MemoryPosRepository implements PosRepository {
       input.memberName ? ` · ${input.memberName}` : ""
     }`;
     const dateIso = new Date().toISOString();
+    const receipt = buildSubscriptionReceipt(input, ticketId, dateIso);
     const sale: PosSale = {
       id: ticketId.replace("TKT-", "POS-"),
       transactionType: "subscription",
@@ -196,7 +198,7 @@ export class MemoryPosRepository implements PosRepository {
     };
     this.sales = [sale, ...this.sales];
     this.persistSales();
-    return { sale };
+    return { sale, receipt };
   }
 
   async listSales(params?: {

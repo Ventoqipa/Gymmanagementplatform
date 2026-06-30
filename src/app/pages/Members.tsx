@@ -29,7 +29,13 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { addMembershipPayment, getPaymentsForMember } from "../lib/demoStore";
 import { getGymPosService } from "../config/gymPosService";
-import type { SubscriptionConcept } from "@/features/pos";
+import {
+  PosTicketModal,
+  DEFAULT_LABELS,
+  buildSubscriptionReceipt,
+  type PosTicketReceipt,
+  type SubscriptionConcept,
+} from "@/features/pos";
 import {
   loadMembers,
   saveMembers,
@@ -388,6 +394,8 @@ export default function Members() {
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
   const [paymentModalMember, setPaymentModalMember] = useState<Member | null>(null);
+  const [subscriptionTicketReceipt, setSubscriptionTicketReceipt] =
+    useState<PosTicketReceipt | null>(null);
   const [paymentForm, setPaymentForm] = useState({
     amount: "89.99",
     concept: "MEMBERSHIP" as "MEMBERSHIP" | "RENEWAL" | "OTHER",
@@ -663,24 +671,33 @@ export default function Members() {
     method: "CASH" | "CARD" | "QR";
     concept: SubscriptionConcept;
     periodKey?: string | null;
-  }) => {
+  }): Promise<{ receipt: PosTicketReceipt; synced: boolean }> => {
+    const checkoutInput = {
+      memberId: opts.memberId,
+      memberName: opts.memberName,
+      amount: opts.amount,
+      paymentMethod: opts.method,
+      concept: opts.concept,
+      periodKey: opts.periodKey ?? undefined,
+    };
     try {
-      await getGymPosService().checkoutSubscription({
-        memberId: opts.memberId,
-        memberName: opts.memberName,
-        amount: opts.amount,
-        paymentMethod: opts.method,
-        concept: opts.concept,
-        periodKey: opts.periodKey ?? undefined,
-      });
-    } catch (error) {
+      const { receipt } =
+        await getGymPosService().checkoutSubscription(checkoutInput);
+      return { receipt, synced: true };
+    } catch {
       addMembershipPayment({
         memberId: opts.memberId,
         amount: opts.amount,
         concept: opts.concept,
         method: opts.method,
       });
-      throw error;
+      return {
+        receipt: buildSubscriptionReceipt(
+          checkoutInput,
+          `TKT-${Date.now().toString(36).toUpperCase()}`,
+        ),
+        synced: false,
+      };
     }
   };
 
@@ -689,21 +706,23 @@ export default function Members() {
     if (!paymentModalMember) return;
     const amount = parseFloat(paymentForm.amount);
     if (Number.isNaN(amount) || amount <= 0) return;
-    try {
-      await registerSubscriptionPayment({
-        memberId: paymentModalMember.id,
-        memberName: memberFullName(paymentModalMember),
-        amount,
-        concept: paymentForm.concept,
-        method: paymentForm.method,
-      });
+    const { receipt, synced } = await registerSubscriptionPayment({
+      memberId: paymentModalMember.id,
+      memberName: memberFullName(paymentModalMember),
+      amount,
+      concept: paymentForm.concept,
+      method: paymentForm.method,
+    });
+    if (synced) {
       toast.success("Pago de suscripción registrado");
-    } catch {
+    } else {
       toast.warning("Pago guardado localmente", {
-        description: "No se pudo sincronizar con el POS API; quedó en almacén local.",
+        description:
+          "No se pudo sincronizar con el POS API; quedó en almacén local.",
       });
     }
     setPaymentModalMember(null);
+    setSubscriptionTicketReceipt(receipt);
     setPaymentsTick((t) => t + 1);
   };
 
@@ -842,20 +861,20 @@ export default function Members() {
         return next;
       });
       if (newMemberForm.payNow) {
-        try {
-          await registerSubscriptionPayment({
-            memberId: row.id,
-            memberName: fullName,
-            amount: paymentAmount,
-            concept: "MEMBERSHIP",
-            method: newMemberForm.paymentMethod,
-            periodKey: newMemberForm.selectedPeriodKey,
-          });
-        } catch {
+        const { receipt, synced } = await registerSubscriptionPayment({
+          memberId: row.id,
+          memberName: fullName,
+          amount: paymentAmount,
+          concept: "MEMBERSHIP",
+          method: newMemberForm.paymentMethod,
+          periodKey: newMemberForm.selectedPeriodKey,
+        });
+        if (!synced) {
           toast.warning("Miembro registrado; pago solo en almacén local", {
             description: "No se pudo registrar el cobro en el POS API.",
           });
         }
+        setSubscriptionTicketReceipt(receipt);
         setPaymentsTick((t) => t + 1);
       }
       setMembersFromApi(true);
@@ -2078,6 +2097,13 @@ export default function Members() {
             </div>
           </div>
         </div>
+      )}
+      {subscriptionTicketReceipt && (
+        <PosTicketModal
+          receipt={subscriptionTicketReceipt}
+          labels={DEFAULT_LABELS}
+          onClose={() => setSubscriptionTicketReceipt(null)}
+        />
       )}
     </div>
   );

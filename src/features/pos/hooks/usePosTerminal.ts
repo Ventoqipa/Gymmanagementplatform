@@ -38,6 +38,16 @@ export function usePosTerminal() {
   const [editProduct, setEditProduct] = useState<ProductFormState>(() =>
     emptyForm(defaultProductCategory),
   );
+  const [selectedCustomer, setSelectedCustomer] = useState<LinkedCustomer | null>(
+    () =>
+      linkedCustomer?.id && linkedCustomer?.name ? { ...linkedCustomer } : null,
+  );
+  const [customerOptions, setCustomerOptions] = useState<LinkedCustomer[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+  const [memberSearch, setMemberSearch] = useState("");
+
+  const canPickMember = Boolean(config.loadCustomers);
 
   const refreshProducts = useCallback(async () => {
     setProductsLoading(true);
@@ -60,12 +70,56 @@ export function usePosTerminal() {
   }, [refreshProducts]);
 
   useEffect(() => {
-    if (linkedCustomer?.name) {
+    if (linkedCustomer?.id && linkedCustomer?.name) {
+      setSelectedCustomer({ id: linkedCustomer.id, name: linkedCustomer.name });
       notify.info(`Tienda vinculada a ${linkedCustomer.name}`, {
         description: "La venta queda asociada al miembro en el ticket.",
       });
     }
   }, [linkedCustomer?.id, linkedCustomer?.name, notify]);
+
+  useEffect(() => {
+    const load = config.loadCustomers;
+    if (!load) return;
+    let cancelled = false;
+    setCustomersLoading(true);
+    void load()
+      .then((list) => {
+        if (!cancelled) setCustomerOptions(list);
+      })
+      .catch(() => {
+        if (!cancelled) setCustomerOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCustomersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.loadCustomers]);
+
+  const filteredCustomers = useMemo(() => {
+    const q = memberSearch.trim().toLowerCase();
+    if (!q) return customerOptions;
+    return customerOptions.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q),
+    );
+  }, [customerOptions, memberSearch]);
+
+  const openCustomerDropdown = () => {
+    setCustomerDropdownOpen(true);
+  };
+
+  const selectCustomer = (customer: LinkedCustomer | null) => {
+    setSelectedCustomer(customer);
+    setCustomerDropdownOpen(false);
+    setMemberSearch("");
+  };
+
+  const clearSelectedCustomer = () => {
+    selectCustomer(null);
+  };
 
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
@@ -248,8 +302,8 @@ export function usePosTerminal() {
   const handleCheckout = async () => {
     if (cart.length === 0 || !paymentMethod) return;
     const member: LinkedCustomer | undefined =
-      linkedCustomer?.id && linkedCustomer?.name
-        ? { id: linkedCustomer.id, name: linkedCustomer.name }
+      selectedCustomer?.id && selectedCustomer?.name
+        ? { id: selectedCustomer.id, name: selectedCustomer.name }
         : undefined;
     try {
       const result = await service.checkout(
@@ -280,6 +334,17 @@ export function usePosTerminal() {
   return {
     labels,
     linkedCustomer,
+    canPickMember,
+    selectedCustomer,
+    selectCustomer,
+    clearSelectedCustomer,
+    openCustomerDropdown,
+    customersLoading,
+    customerDropdownOpen,
+    setCustomerDropdownOpen,
+    memberSearch,
+    setMemberSearch,
+    filteredCustomers,
     products,
     filteredProducts,
     searchTerm,

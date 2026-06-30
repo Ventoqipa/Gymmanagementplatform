@@ -13,6 +13,10 @@ import type {
 } from "../domain/types";
 import { filterSalesByType, normalizePosSale, resolveTransactionType } from "../domain/filterSales";
 import {
+  buildSubscriptionReceipt,
+  ticketIdFromSaleId,
+} from "../domain/subscriptionReceipt";
+import {
   localDayEndUtcIso,
   localDayStartUtcIso,
 } from "@/app/lib/labels";
@@ -100,8 +104,11 @@ export class RestPosRepository implements PosRepository {
 
   async checkoutSubscription(
     input: SubscriptionCheckoutInput,
-  ): Promise<{ sale: PosSale }> {
-    const result = await posPost<{ sale: PosSale }>(
+  ): Promise<{ sale: PosSale; receipt: PosTicketReceipt }> {
+    const result = await posPost<{
+      sale: PosSale;
+      receipt?: PosTicketReceipt;
+    }>(
       this.config,
       POS_API_PATHS.salesSubscription,
       {
@@ -115,7 +122,15 @@ export class RestPosRepository implements PosRepository {
         payerName: input.payerName,
       },
     );
-    return { sale: normalizePosSale(result.sale) };
+    const sale = normalizePosSale(result.sale);
+    const receipt =
+      result.receipt ??
+      buildSubscriptionReceipt(
+        input,
+        ticketIdFromSaleId(sale.id),
+        sale.dateIso,
+      );
+    return { sale, receipt };
   }
 
   async listSales(params?: {

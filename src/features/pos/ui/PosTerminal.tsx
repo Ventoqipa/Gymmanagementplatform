@@ -1,6 +1,7 @@
 import {
   Banknote,
   CreditCard,
+  ChevronDown,
   Minus,
   Package,
   Pencil,
@@ -12,7 +13,10 @@ import {
   User,
   X,
 } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { usePosTerminal } from "../hooks/usePosTerminal";
+import type { LinkedCustomer } from "../domain/types";
+import { PosTicketModal } from "./PosTicketModal";
 
 const PAYMENT_ICONS = {
   CARD: CreditCard,
@@ -95,6 +99,131 @@ function CheckoutDock({ pos, labels, canCheckout, className = "" }: CheckoutDock
   );
 }
 
+type CustomerSaleDropdownProps = {
+  pos: ReturnType<typeof usePosTerminal>;
+  labels: ReturnType<typeof usePosTerminal>["labels"];
+  className?: string;
+};
+
+function CustomerSaleDropdown({ pos, labels, className = "" }: CustomerSaleDropdownProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pos.customerDropdownOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        pos.setCustomerDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [pos.customerDropdownOpen, pos.setCustomerDropdownOpen]);
+
+  if (!pos.canPickMember) return null;
+
+  const selectedLabel = pos.selectedCustomer?.name ?? labels.customerDropdownPlaceholder;
+  const hasCustomer = Boolean(pos.selectedCustomer?.name);
+
+  return (
+    <div ref={rootRef} className={`relative ${className}`}>
+      <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 h-full">
+        <button
+          type="button"
+          onClick={() => pos.setCustomerDropdownOpen(!pos.customerDropdownOpen)}
+          aria-expanded={pos.customerDropdownOpen}
+          aria-haspopup="listbox"
+          aria-label={labels.saleCustomerTitle}
+          title={
+            hasCustomer && pos.selectedCustomer
+              ? `${pos.selectedCustomer.name} (${pos.selectedCustomer.id})`
+              : labels.customerDropdownPlaceholder
+          }
+          className={`w-full h-[46px] flex items-center gap-2 bg-[#131313] border px-3 text-left transition-colors ${
+            hasCustomer
+              ? "border-[#e31e24]/40 text-[#e5e2e1]"
+              : "border-[rgba(93,63,60,0.2)] text-[#808080] hover:border-[#e31e24]"
+          }`}
+        >
+          <User size={16} className="text-[#e31e24] shrink-0" />
+          <span className="flex-1 min-w-0 text-[13px] font-medium truncate">{selectedLabel}</span>
+          <ChevronDown
+            size={16}
+            className={`shrink-0 transition-transform ${pos.customerDropdownOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+      </div>
+
+      {pos.customerDropdownOpen ? (
+        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] shadow-[0_12px_40px_rgba(0,0,0,0.55)] p-3 space-y-2">
+          <div className="relative">
+            <Search
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#808080]"
+              size={14}
+            />
+            <input
+              type="text"
+              value={pos.memberSearch}
+              onChange={(e) => pos.setMemberSearch(e.target.value)}
+              placeholder={labels.searchMemberPlaceholder}
+              autoFocus
+              className="w-full bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] pl-8 pr-3 py-2 text-[12px] focus:border-[#e31e24] focus:outline-none"
+            />
+          </div>
+          <div
+            role="listbox"
+            aria-label={labels.saleCustomerTitle}
+            className="max-h-[min(220px,40vh)] overflow-y-auto space-y-1"
+          >
+            <button
+              type="button"
+              role="option"
+              aria-selected={!hasCustomer}
+              onClick={() => pos.clearSelectedCustomer()}
+              className={`w-full text-left px-3 py-2 text-[11px] transition-colors ${
+                !hasCustomer
+                  ? "bg-[#e31e24]/15 border border-[#e31e24]/40 text-[#e5e2e1]"
+                  : "bg-[#131313] border border-transparent text-[#808080] hover:border-[rgba(93,63,60,0.3)]"
+              }`}
+            >
+              {labels.noMemberSelected}
+            </button>
+            {pos.customersLoading ? (
+              <p className="text-[#808080] text-[11px] px-3 py-2">{labels.membersLoading}</p>
+            ) : pos.filteredCustomers.length === 0 ? (
+              <p className="text-[#808080] text-[11px] px-3 py-2">{labels.noMembersFound}</p>
+            ) : (
+              pos.filteredCustomers.map((customer: LinkedCustomer) => {
+                const selected = pos.selectedCustomer?.id === customer.id;
+                return (
+                  <button
+                    key={customer.id}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => pos.selectCustomer(customer)}
+                    className={`w-full text-left px-3 py-2 transition-colors ${
+                      selected
+                        ? "bg-[#e31e24]/15 border border-[#e31e24]/50"
+                        : "bg-[#131313] border border-transparent hover:border-[#e31e24]/40"
+                    }`}
+                  >
+                    <p className="text-[#e5e2e1] text-[12px] font-bold truncate">
+                      {customer.name}
+                    </p>
+                    <p className="text-[#808080] text-[9px] font-mono truncate">
+                      {customer.id}
+                    </p>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function PosTerminal() {
   const pos = usePosTerminal();
   const { labels } = pos;
@@ -110,31 +239,14 @@ export function PosTerminal() {
           </h1>
         </div>
 
-        {pos.linkedCustomer?.name && (
-          <div className="mb-6 flex items-center gap-3 bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] px-4 py-3">
-            <User className="text-[#e31e24] shrink-0" size={20} />
-            <div>
-              <p className="text-[#808080] text-[10px] uppercase font-bold tracking-wide">
-                {labels.linkedCustomerHint}
-              </p>
-              <p className="text-[#e5e2e1] text-[14px] font-bold">
-                {pos.linkedCustomer.name}{" "}
-                <span className="text-[#808080] font-mono text-[12px] font-normal">
-                  ({pos.linkedCustomer.id})
-                </span>
-              </p>
-            </div>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div
             className={`lg:col-span-2 space-y-4 ${
               showCheckoutDock ? "order-2 lg:order-none" : "order-1 lg:order-none"
             }`}
           >
-            <div className="flex gap-3">
-              <div className="flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4">
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch">
+              <div className="flex-1 min-w-0 bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4">
                 <div className="relative">
                   <Search
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-[#808080]"
@@ -145,20 +257,27 @@ export function PosTerminal() {
                     value={pos.searchTerm}
                     onChange={(e) => pos.setSearchTerm(e.target.value)}
                     placeholder={labels.searchPlaceholder}
-                    className="w-full bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] pl-11 pr-4 py-3 focus:border-[#e31e24] focus:outline-none transition-colors font-['Space_Grotesk',sans-serif] text-[14px]"
+                    className="w-full h-[46px] bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] pl-11 pr-4 focus:border-[#e31e24] focus:outline-none transition-colors font-['Space_Grotesk',sans-serif] text-[14px]"
                   />
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => pos.setShowAddProductModal(true)}
-                className="bg-[#e31e24] text-white px-6 py-3 flex items-center gap-2 hover:bg-[#c41a20] transition-colors"
-              >
-                <Package size={18} />
-                <span className="text-[10px] font-bold tracking-[1px] uppercase whitespace-nowrap">
-                  {labels.addProduct}
-                </span>
-              </button>
+              <div className="shrink-0 bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 flex items-center">
+                <button
+                  type="button"
+                  onClick={() => pos.setShowAddProductModal(true)}
+                  className="h-[46px] bg-[#e31e24] text-white px-5 sm:px-6 flex items-center justify-center gap-2 hover:bg-[#c41a20] transition-colors whitespace-nowrap"
+                >
+                  <Package size={18} />
+                  <span className="text-[10px] font-bold tracking-[1px] uppercase">
+                    {labels.addProduct}
+                  </span>
+                </button>
+              </div>
+              <CustomerSaleDropdown
+                pos={pos}
+                labels={labels}
+                className="w-full sm:w-[min(100%,280px)] shrink-0"
+              />
             </div>
 
             <div className="flex gap-3 flex-wrap">
@@ -262,7 +381,7 @@ export function PosTerminal() {
               showCheckoutDock ? "order-1 lg:order-none" : "order-2 lg:order-none"
             }`}
           >
-            <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 shrink-0">
+            <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 shrink-0 space-y-2">
               <div className="flex justify-between items-center">
                 <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
                   {labels.cartTitle}
@@ -277,6 +396,11 @@ export function PosTerminal() {
                   </button>
                 )}
               </div>
+              {pos.canPickMember && pos.cart.length > 0 && !pos.selectedCustomer ? (
+                <p className="text-[#808080] text-[10px] leading-snug">
+                  {labels.noMemberSelected}
+                </p>
+              ) : null}
             </div>
 
             <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 min-h-[160px] flex-1 overflow-auto lg:max-h-[min(360px,calc(100vh-22rem))]">
@@ -605,102 +729,11 @@ export function PosTerminal() {
       )}
 
       {pos.ticketReceipt && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4 overflow-auto">
-          <div className="bg-[#f5f5f0] text-[#1a1a1a] max-w-md w-full shadow-2xl border-4 border-[#e31e24]">
-            <div className="bg-[#1a1a1a] text-white px-4 py-3 flex justify-between items-center">
-              <div>
-                <p className="text-[9px] uppercase tracking-[0.2em] text-[#e31e24] font-bold">
-                  {labels.ticketBrand}
-                </p>
-                <p className="text-[11px] font-mono mt-1">
-                  Ticket · {pos.ticketReceipt.id}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => pos.setTicketReceipt(null)}
-                className="text-[#aaa] hover:text-white p-1"
-                aria-label="Cerrar"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-6 space-y-4 font-['Space_Grotesk',sans-serif]">
-              <p className="text-[11px] text-[#555]">
-                {new Date(pos.ticketReceipt.createdIso).toLocaleString("es-MX", {
-                  dateStyle: "full",
-                  timeStyle: "short",
-                })}
-              </p>
-              {pos.ticketReceipt.member && (
-                <div className="text-[12px] border-b border-[#ddd] pb-3">
-                  <p className="font-bold uppercase text-[10px] text-[#e31e24]">
-                    {labels.ticketClient}
-                  </p>
-                  <p className="font-bold">{pos.ticketReceipt.member.name}</p>
-                  <p className="font-mono text-[11px] text-[#666]">
-                    {pos.ticketReceipt.member.id}
-                  </p>
-                </div>
-              )}
-              {pos.ticketReceipt.payer?.name && (
-                <div className="text-[12px] border-b border-[#ddd] pb-3">
-                  <p className="font-bold uppercase text-[10px] text-[#e31e24]">
-                    Pagador
-                  </p>
-                  <p className="font-bold">{pos.ticketReceipt.payer.name}</p>
-                  {pos.ticketReceipt.payer.id && (
-                    <p className="font-mono text-[11px] text-[#666]">
-                      {pos.ticketReceipt.payer.id}
-                    </p>
-                  )}
-                </div>
-              )}
-              <div className="space-y-2">
-                {pos.ticketReceipt.lines.map((line) => (
-                  <div key={line.id} className="flex justify-between gap-2 text-[12px]">
-                    <span>
-                      <span className="font-bold">{line.qty}</span>× {line.name}
-                      <span className="block font-mono text-[10px] text-[#888]">
-                        {line.id}
-                      </span>
-                    </span>
-                    <span className="font-bold shrink-0">
-                      ${line.lineTotal.toFixed(2)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <div className="border-t border-[#ccc] pt-3 space-y-1 text-[12px]">
-                <div className="flex justify-between text-[18px] font-black pt-2">
-                  <span>{labels.total}</span>
-                  <span>
-                    ${pos.ticketReceipt.total.toFixed(2)} {labels.currencySuffix}
-                  </span>
-                </div>
-              </div>
-              <p className="text-[11px] uppercase tracking-wide">
-                {labels.ticketPayment}:{" "}
-                <span className="font-bold">
-                  {labels.paymentMethods[pos.ticketReceipt.paymentMethod] ??
-                    pos.ticketReceipt.paymentMethod}
-                </span>
-              </p>
-              <p className="text-[10px] text-[#888] text-center pt-2 leading-relaxed">
-                {labels.ticketFooter}
-              </p>
-            </div>
-            <div className="px-6 pb-6">
-              <button
-                type="button"
-                onClick={() => pos.setTicketReceipt(null)}
-                className="w-full bg-[#e31e24] text-white py-3 font-bold text-[11px] uppercase tracking-wide hover:bg-[#c41a20] transition-colors"
-              >
-                {labels.ticketClose}
-              </button>
-            </div>
-          </div>
-        </div>
+        <PosTicketModal
+          receipt={pos.ticketReceipt}
+          labels={labels}
+          onClose={() => pos.setTicketReceipt(null)}
+        />
       )}
     </div>
   );

@@ -15,6 +15,16 @@ export type PosLabels = {
   paymentMethod: string;
   checkout: string;
   linkedCustomerHint: string;
+  saleCustomerTitle: string;
+  customerDropdownPlaceholder: string;
+  selectedMemberLabel: string;
+  selectMemberButton: string;
+  changeMemberButton: string;
+  searchMemberPlaceholder: string;
+  noMemberSelected: string;
+  clearMember: string;
+  membersLoading: string;
+  noMembersFound: string;
   inventory: string;
   newProduct: string;
   editProduct: string;
@@ -69,6 +79,8 @@ export type PosConfig = {
   getAuthToken?: () => string | null;
   onSaleComplete?: (sale: import("../domain/types").PosSale) => void;
   confirmDelete?: (message: string) => boolean;
+  /** Directorio de miembros para asociar ventas en tienda. */
+  loadCustomers?: () => Promise<import("../domain/types").LinkedCustomer[]>;
 };
 
 export type PosConfigInput = Partial<

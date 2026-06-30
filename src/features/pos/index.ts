@@ -3,6 +3,7 @@
 export { PosProvider, usePosContext } from "./ui/PosProvider";
 export type { PosProviderProps } from "./ui/PosProvider";
 export { PosTerminal } from "./ui/PosTerminal";
+export { PosTicketModal } from "./ui/PosTicketModal";
 export { usePosTerminal } from "./hooks/usePosTerminal";
 
 export { createPosConfig, eliteGymPosConfig } from "./config/createPosConfig";
@@ -54,5 +55,10 @@ export {
 } from "./infrastructure/localPosStorage";
 
 export { filterSalesByType, normalizePosSale, resolveTransactionType } from "./domain/filterSales";
+export {
+  buildSubscriptionReceipt,
+  subscriptionConceptLabel,
+  ticketIdFromSaleId,
+} from "./domain/subscriptionReceipt";
 export { summarizePosSales } from "./domain/summarizeSales";
 export { posConfig, getPosApiUrl } from "./config";

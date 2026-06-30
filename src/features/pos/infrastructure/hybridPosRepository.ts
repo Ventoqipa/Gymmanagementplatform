@@ -87,7 +87,7 @@ export class HybridPosRepository implements PosRepository {
 
   async checkoutSubscription(
     input: SubscriptionCheckoutInput,
-  ): Promise<{ sale: PosSale }> {
+  ): Promise<{ sale: PosSale; receipt: PosTicketReceipt }> {
     try {
       return await this.remote.checkoutSubscription(input);
     } catch (error) {
