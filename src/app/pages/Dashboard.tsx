@@ -1,11 +1,15 @@
-import { useMemo } from "react";
-import { Activity, Users, DollarSign, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Activity, DollarSign, Loader2, TrendingUp, Users } from "lucide-react";
+import type { PosSale } from "@/features/pos";
+import { getGymPosService } from "../config/gymPosService";
+import { localDateIso } from "../lib/labels";
 import {
+  buildRecentActivity,
+  buildRevenueToday,
   getActiveMembersCountFromStore,
   getDailyCheckIns,
   getPeakHoursSlots,
-  getRecentActivity,
-  getRevenueToday,
+  getPosSalesTodaySync,
 } from "../lib/platformStats";
 
 function formatMoney(n: number): string {
@@ -18,11 +22,46 @@ function formatMoney(n: number): string {
 }
 
 export default function Dashboard() {
+  const [posSalesToday, setPosSalesToday] = useState<PosSale[]>([]);
+  const [posLoading, setPosLoading] = useState(true);
+
   const activeMembers = useMemo(() => getActiveMembersCountFromStore(), []);
   const checkIns = useMemo(() => getDailyCheckIns(), []);
-  const revenue = useMemo(() => getRevenueToday(), []);
   const peakSlots = useMemo(() => getPeakHoursSlots(), []);
-  const activity = useMemo(() => getRecentActivity(), []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPosSalesToday = async () => {
+      setPosLoading(true);
+      const today = localDateIso();
+      try {
+        const sales = await getGymPosService().listSales({
+          from: today,
+          to: today,
+        });
+        if (!cancelled) setPosSalesToday(sales);
+      } catch {
+        if (!cancelled) setPosSalesToday(getPosSalesTodaySync());
+      } finally {
+        if (!cancelled) setPosLoading(false);
+      }
+    };
+
+    void loadPosSalesToday();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const revenue = useMemo(
+    () => buildRevenueToday(posSalesToday),
+    [posSalesToday],
+  );
+  const activity = useMemo(
+    () => buildRecentActivity(posSalesToday),
+    [posSalesToday],
+  );
 
   const capacityPct =
     activeMembers > 0
@@ -71,15 +110,20 @@ export default function Dashboard() {
         <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 md:p-5">
           <div className="flex items-start justify-between mb-3">
             <DollarSign className="text-[#e31e24]" size={20} />
+            {posLoading ? (
+              <Loader2 className="text-[#808080] animate-spin" size={16} />
+            ) : null}
           </div>
           <p className="text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
             Ingresos hoy
           </p>
           <p className="text-[#e5e2e1] text-[22px] font-black leading-none">
-            {formatMoney(revenue.total)}
+            {posLoading ? "—" : formatMoney(revenue.total)}
           </p>
           <p className="text-[#808080] text-[10px] mt-2">
-            {revenue.transactions} transacciones
+            {posLoading
+              ? "Cargando ventas del POS…"
+              : `${revenue.transactions} transacciones`}
           </p>
         </div>
 
@@ -123,7 +167,7 @@ export default function Dashboard() {
         <p className="text-[#e31e24] text-[9px] font-bold tracking-[1.5px] uppercase mb-3">
           Actividad reciente
         </p>
-        {activity.length === 0 ? (
+        {activity.length === 0 && !posLoading ? (
           <p className="text-[#808080] text-[12px]">
             Sin actividad registrada. Los accesos, pagos y ventas de la tienda aparecerán aquí.
           </p>

@@ -19,17 +19,34 @@ export function getPosSalesTodaySync(): PosSale[] {
     .sort((a, b) => new Date(b.dateIso).getTime() - new Date(a.dateIso).getTime());
 }
 
-export function getRevenueToday(): { total: number; transactions: number } {
+function membershipRevenueToday(): { total: number; transactions: number } {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  const membership = getMembershipPayments().filter(
+  const payments = getMembershipPayments().filter(
     (p) => new Date(p.dateIso) >= start,
   );
-  const pos = getPosSalesTodaySync();
-  const total =
-    membership.reduce((a, p) => a + p.amount, 0) +
-    pos.reduce((a, s) => a + s.total, 0);
-  return { total, transactions: membership.length + pos.length };
+  return {
+    total: payments.reduce((a, p) => a + p.amount, 0),
+    transactions: payments.length,
+  };
+}
+
+/** Ingresos del día: pagos de membresía (local) + ventas POS (API o caché). */
+export function buildRevenueToday(posSales: PosSale[]): {
+  total: number;
+  transactions: number;
+} {
+  const membership = membershipRevenueToday();
+  const posTotal = posSales.reduce((a, s) => a + s.total, 0);
+  return {
+    total: membership.total + posTotal,
+    transactions: membership.transactions + posSales.length,
+  };
+}
+
+/** @deprecated Usar buildRevenueToday con ventas del POS API. */
+export function getRevenueToday(): { total: number; transactions: number } {
+  return buildRevenueToday(getPosSalesTodaySync());
 }
 
 export function getDailyCheckIns(): number {
@@ -90,7 +107,10 @@ function relativeTime(iso: string): string {
   return `hace ${days} d`;
 }
 
-export function getRecentActivity(limit = 8): ActivityRow[] {
+export function buildRecentActivity(
+  posSales: PosSale[],
+  limit = 8,
+): ActivityRow[] {
   const rows: ActivityRow[] = [];
 
   for (const e of getAccessLog().slice(0, 20)) {
@@ -104,7 +124,7 @@ export function getRecentActivity(limit = 8): ActivityRow[] {
     });
   }
 
-  for (const s of getPosSalesTodaySync().slice(0, 10)) {
+  for (const s of posSales.slice(0, 10)) {
     rows.push({
       action: ACTIVITY.CARRITO_COMPRAS,
       name: s.memberName ?? s.linesSummary.slice(0, 40),
@@ -128,6 +148,11 @@ export function getRecentActivity(limit = 8): ActivityRow[] {
   return rows
     .sort((a, b) => b.sortKey - a.sortKey)
     .slice(0, limit);
+}
+
+/** @deprecated Usar buildRecentActivity con ventas del POS API. */
+export function getRecentActivity(limit = 8): ActivityRow[] {
+  return buildRecentActivity(getPosSalesTodaySync(), limit);
 }
 
 export function computeTopProducts(
