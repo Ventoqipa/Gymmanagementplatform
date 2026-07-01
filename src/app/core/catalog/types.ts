@@ -43,8 +43,9 @@ export type CatalogClient = Partial<CatalogClientWritePayload> & {
   /** Legacy */
   enrollment?: string;
   renewal?: string | null;
-  photoClientIDFileName?: string | null;
-  photoClientIDBase64?: string | null;
+  memberID?: string | null;
+  faceID?: string | null;
+  DateExpiration?: string;
 };
 
 export type CatalogPlan = {
@@ -97,7 +98,7 @@ export type UpdatePlanInput = AddPlanInput & {
   planID: number;
 };
 
-/** Ítem resumido de GET Client/ListAll */
+/** Ítem resumido de GET Client/ListAll (fallback). */
 export type CatalogClientListItem = {
   ClientID?: number;
   clientID?: number;

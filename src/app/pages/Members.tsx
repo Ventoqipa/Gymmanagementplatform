@@ -405,7 +405,7 @@ export default function Members() {
 
   const refreshMembersFromApi = async () => {
     if (!isAuthenticated) {
-      setMembers(loadMembers());
+      setMembers([]);
       setMembersFromApi(false);
       setMembersLoading(false);
       return;
@@ -426,7 +426,7 @@ export default function Members() {
           description: result.message,
         });
       } else {
-        toast.warning("Sin conexión; mostrando datos guardados", {
+        toast.warning("Sin conexión; mostrando última copia guardada", {
           description: result.message,
         });
       }

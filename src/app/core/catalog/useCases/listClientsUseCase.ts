@@ -2,6 +2,7 @@ import { getBranchId, getCompanyId } from "../../auth/authStorage";
 import { CatalogApiError } from "../catalogApiClient";
 import { fetchClientsList } from "../clientApi";
 import { clientsToMembers } from "../mappers/clientMemberMapper";
+import { fetchPlansList } from "../planApi";
 import type { Member } from "../../../lib/membersStore";
 
 export type ListClientsResult =
@@ -20,8 +21,14 @@ export async function listClientsUseCase(): Promise<ListClientsResult> {
   }
 
   try {
-    const clients = await fetchClientsList(companyId, branchId);
-    const members = clientsToMembers(clients);
+    const [clients, plans] = await Promise.all([
+      fetchClientsList(companyId, branchId),
+      fetchPlansList().catch(() => []),
+    ]);
+    const planNameById = Object.fromEntries(
+      plans.map((plan) => [plan.planID, plan.planName]),
+    );
+    const members = clientsToMembers(clients, planNameById);
     return { ok: true, members: members.slice().reverse() };
   } catch (error) {
     if (error instanceof CatalogApiError) {

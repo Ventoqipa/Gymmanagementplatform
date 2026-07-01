@@ -30,6 +30,24 @@ function readEmergencyPhone(client: CatalogClient): string | undefined {
   return decodeEmergencyPhone(client.middleName);
 }
 
+function readDocDataUrl(client: CatalogClient): string | undefined {
+  const b64 = client.DocBase64?.trim();
+  if (!b64 || b64 === "-") return undefined;
+  const ext = (client.DocExtensionName ?? "").toLowerCase();
+  const mime = ext.includes("png")
+    ? "image/png"
+    : ext.includes("jpg") || ext.includes("jpeg")
+      ? "image/jpeg"
+      : "image/png";
+  return `data:${mime};base64,${b64}`;
+}
+
+function isInactive(client: CatalogClient): boolean {
+  if (client.isEnabled === false) return true;
+  if (client.statusID != null && client.statusID !== 1) return true;
+  return false;
+}
+
 export function memberIdFromClient(client: CatalogClient): string {
   return `CLI-${client.clientID}`;
 }
@@ -60,10 +78,9 @@ export function clientToMember(
       : undefined;
 
   const id = client.clientID || 0;
-  const tier =
-    client.isEnabled === false
-      ? "INACTIVE"
-      : options?.planName?.trim() || "GOLD";
+  const tier = isInactive(client)
+    ? "INACTIVE"
+    : options?.planName?.trim() || "GOLD";
 
   const national = client.phoneNumber?.trim() || "";
   const code = client.phoneCodeNumber?.trim().replace(/\D/g, "");
@@ -74,6 +91,8 @@ export function clientToMember(
         ? national
         : "";
 
+  const faceId = client.faceID?.trim();
+
   return {
     id: memberIdFromClient(client),
     firstName: firstName || "—",
@@ -81,8 +100,8 @@ export function clientToMember(
     tier,
     enrollmentDate: isoDatePart(readEnrollment(client)),
     renewalDate: isoDatePart(readRenewal(client)),
-    monthlyVisits: (id % 15) + 4,
-    avgSessionTime: 35 + (id % 25),
+    monthlyVisits: 0,
+    avgSessionTime: 0,
     email:
       client.email?.trim() && client.email !== "-"
         ? client.email.trim()
@@ -90,7 +109,9 @@ export function clientToMember(
     phone,
     emergencyPhone: readEmergencyPhone(client),
     address,
-    faceIdEnrolled: undefined,
+    idDocumentDataUrl: readDocDataUrl(client),
+    faceIdEnrolled: faceId ? true : undefined,
+    faceIdTemplateId: faceId || undefined,
   };
 }
 

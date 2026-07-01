@@ -9,8 +9,8 @@ const catalogApiBaseUrl = resolveApiBaseUrl({
 export const catalogConfig = {
   apiBaseUrl: catalogApiBaseUrl,
   paths: {
-    listAll: (companyId: number, branchId: number) =>
-      `/api/eg/Catalogs/Client/ListAll/${companyId}/${branchId}`,
+    viewAll: (companyId: number, branchId: number) =>
+      `/api/eg/Catalogs/Client/ViewAll/${companyId}/${branchId}`,
     getData: (clientId: number) =>
       `/api/eg/Catalogs/Client/GetData/${clientId}`,
     add: "/api/eg/Catalogs/Client/Add",

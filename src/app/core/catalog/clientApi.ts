@@ -1,6 +1,10 @@
 import { catalogConfig, catalogUrl } from "../../config/catalog";
 import { catalogRequest } from "./catalogApiClient";
 import { mapListItemsToCatalogClients } from "./mappers/clientListMapper";
+import {
+  isFullCatalogClient,
+  normalizeCatalogClient,
+} from "./mappers/normalizeCatalogClient";
 import { dataUrlToBase64, dataUrlToExtension } from "./utils/clientPhoto";
 import type {
   AddClientInput,
@@ -124,22 +128,14 @@ export function buildClientPayload(
   };
 }
 
-function isCatalogClient(value: unknown): value is CatalogClient {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    "clientID" in value &&
-    ("planID" in value || "DateEnrollment" in value || "enrollment" in value)
-  );
-}
-
 function normalizeClientList(
   data: unknown,
   scope: { companyId: number; branchId: number },
 ): CatalogClient[] {
   if (Array.isArray(data)) {
-    if (data.length > 0 && isCatalogClient(data[0])) {
-      return data as CatalogClient[];
+    if (data.length === 0) return [];
+    if (isFullCatalogClient(data[0])) {
+      return data.map(normalizeCatalogClient);
     }
     return mapListItemsToCatalogClients(data as CatalogClientListItem[], scope);
   }
@@ -148,22 +144,25 @@ function normalizeClientList(
     const obj = data as Record<string, unknown>;
     const genericList = obj.genericList ?? obj.GenericList;
     if (Array.isArray(genericList)) {
+      if (genericList.length > 0 && isFullCatalogClient(genericList[0])) {
+        return genericList.map(normalizeCatalogClient);
+      }
       return mapListItemsToCatalogClients(
         genericList as CatalogClientListItem[],
         scope,
       );
     }
-    for (const key of ["items", "clients", "list"]) {
+    for (const key of ["items", "clients", "client", "list"]) {
       if (Array.isArray(obj[key])) {
         const arr = obj[key] as unknown[];
-        if (arr.length > 0 && isCatalogClient(arr[0])) {
-          return arr as CatalogClient[];
+        if (arr.length > 0 && isFullCatalogClient(arr[0])) {
+          return arr.map(normalizeCatalogClient);
         }
         return mapListItemsToCatalogClients(arr as CatalogClientListItem[], scope);
       }
     }
-    if (isCatalogClient(data)) {
-      return [data];
+    if (isFullCatalogClient(data)) {
+      return [normalizeCatalogClient(data)];
     }
   }
 
@@ -176,7 +175,7 @@ export async function fetchClientsList(
 ): Promise<CatalogClient[]> {
   const data = await catalogRequest<CatalogClientListData | CatalogClient[] | unknown>({
     method: "GET",
-    url: catalogUrl(catalogConfig.paths.listAll(companyId, branchId)),
+    url: catalogUrl(catalogConfig.paths.viewAll(companyId, branchId)),
   });
   return normalizeClientList(data, { companyId, branchId });
 }

@@ -48,7 +48,7 @@ Swagger: [apicatalogsegtest.tanosi.com.mx](https://apicatalogsegtest.tanosi.com.
 
 | Método | Ruta |
 |--------|------|
-| GET | `/api/eg/Catalogs/Client/ListAll/{CompanyID}/{BranchID}` |
+| GET | `/api/eg/Catalogs/Client/ViewAll/{CompanyID}/{BranchID}` |
 | GET | `/api/eg/Catalogs/Client/GetData/{ClientID}` |
 | POST | `/api/eg/Catalogs/Client/Add` |
 | PUT | `/api/eg/Catalogs/Client/Update` |
