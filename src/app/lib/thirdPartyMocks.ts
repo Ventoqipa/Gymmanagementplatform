@@ -2,6 +2,11 @@
  * Tipos y funciones de integración con el proveedor FaceID / torniquetes (sustituir por llamadas HTTP reales).
  */
 
+import {
+  buildAccessCaptureDataUrl,
+  buildUnknownCaptureDataUrl,
+} from "./accessCaptureImage";
+
 export type FaceIdVerifyRequest = {
   terminalId: string;
   captureSessionId: string;
@@ -18,6 +23,8 @@ export type FaceIdVerifyResponse = {
   denyReason?: "NO_MATCH" | "SUSPENDED" | "EXPIRED";
   vendorRequestId: string;
   latencyMs: number;
+  /** Instantánea del intento (URL HTTPS o data URL). Lo envía el Access Gateway. */
+  captureSnapshotUrl?: string;
 };
 
 export type TurnstileCommandRequest = {
@@ -63,6 +70,7 @@ export async function mockFaceIdVerify(req: FaceIdVerifyRequest): Promise<FaceId
       denyReason: "NO_MATCH",
       vendorRequestId,
       latencyMs,
+      captureSnapshotUrl: buildUnknownCaptureDataUrl(),
     };
   }
   const samples = [
@@ -80,6 +88,7 @@ export async function mockFaceIdVerify(req: FaceIdVerifyRequest): Promise<FaceId
     membershipTier: pick.membershipTier,
     vendorRequestId,
     latencyMs,
+    captureSnapshotUrl: buildAccessCaptureDataUrl(pick.memberName, { granted: true }),
   };
 }
 

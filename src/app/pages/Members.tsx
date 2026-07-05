@@ -19,15 +19,15 @@ import {
   MapPin,
   MessageCircle,
   Phone,
+  Pencil,
 } from "lucide-react";
-import { toast } from "sonner";
-import { addClientUseCase, listClientsUseCase } from "../core/catalog";
+import { addClientUseCase, listClientsUseCase, updateClientUseCase, clientIdFromMemberId } from "../core/catalog";
 import {
   getSubscriptionPrice,
   type SubscriptionPeriodKey,
 } from "../lib/plansStore";
 import { useAuth } from "../context/AuthContext";
-import { addMembershipPayment, getPaymentsForMember } from "../lib/demoStore";
+import { addMembershipPayment } from "../lib/demoStore";
 import { getGymPosService } from "../config/gymPosService";
 import {
   PosTicketModal,
@@ -356,6 +356,64 @@ function applySubscriptionPeriod(
   };
 }
 
+function addPeriodToDate(
+  fromIso: string,
+  period: { days?: number; weeks?: number; months?: number },
+): string {
+  const d = new Date(`${fromIso}T12:00:00`);
+  if (period.days) d.setDate(d.getDate() + period.days);
+  else if (period.weeks) d.setDate(d.getDate() + period.weeks * 7);
+  else if (period.months) d.setMonth(d.getMonth() + period.months);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Fecha desde la que se extiende la vigencia al renovar. */
+function renewalBaseDate(member: Pick<Member, "renewalDate">): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return member.renewalDate >= today ? member.renewalDate : today;
+}
+
+function extendMembershipPeriod(
+  fromIso: string,
+  periodKey: SubscriptionPeriodKey,
+): { newRenewalDate: string; cost: string } {
+  const opt = SUBSCRIPTION_PERIOD_OPTIONS.find((p) => p.key === periodKey);
+  if (!opt) {
+    return {
+      newRenewalDate: addPeriodToDate(fromIso, { months: 1 }),
+      cost: getSubscriptionPrice("1m").toFixed(2),
+    };
+  }
+  return {
+    newRenewalDate: addPeriodToDate(fromIso, opt.period),
+    cost: getSubscriptionPrice(periodKey).toFixed(2),
+  };
+}
+
+function memberToEditForm(member: Member) {
+  const digits = normalizePhoneDigits(member.phone ?? "");
+  let dial = "52";
+  let national = digits;
+  if (digits.startsWith("52") && digits.length > 10) {
+    dial = "52";
+    national = digits.slice(2);
+  } else if (digits.length > 10) {
+    dial = digits.slice(0, digits.length - 10);
+    national = digits.slice(-10);
+  }
+  return {
+    firstName: member.firstName,
+    lastName: member.lastName,
+    email: member.email ?? "",
+    phoneCountryDial: dial,
+    phoneNational: national,
+    address: member.address ?? "",
+    enrollmentDate: member.enrollmentDate,
+    renewalDate: member.renewalDate,
+    idDocumentDataUrl: member.idDocumentDataUrl ?? null,
+  };
+}
+
 const emptyNewMemberForm = () => {
   const today = new Date().toISOString().slice(0, 10);
   const defaultPeriod: SubscriptionPeriodKey = "1m";
@@ -397,11 +455,24 @@ export default function Members() {
   const [subscriptionTicketReceipt, setSubscriptionTicketReceipt] =
     useState<PosTicketReceipt | null>(null);
   const [paymentForm, setPaymentForm] = useState({
-    amount: "89.99",
-    concept: "MEMBERSHIP" as "MEMBERSHIP" | "RENEWAL" | "OTHER",
+    amount: getSubscriptionPrice("1m").toFixed(2),
     method: "CARD" as "CASH" | "CARD" | "QR",
+    periodKey: "1m" as SubscriptionPeriodKey,
+    newRenewalDate: "",
   });
-  const [paymentsTick, setPaymentsTick] = useState(0);
+  const [submittingRenewal, setSubmittingRenewal] = useState(false);
+  const [memberEditForm, setMemberEditForm] = useState<ReturnType<typeof memberToEditForm> | null>(null);
+  const [savingMemberEdit, setSavingMemberEdit] = useState(false);
+  const memberEditFileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!expandedMember) {
+      setMemberEditForm(null);
+      return;
+    }
+    const member = members.find((m) => m.id === expandedMember);
+    if (member) setMemberEditForm(memberToEditForm(member));
+  }, [expandedMember]);
 
   const refreshMembersFromApi = async () => {
     if (!isAuthenticated) {
@@ -653,15 +724,93 @@ export default function Members() {
     setCurrentPage(1);
   };
 
-  const paymentsForExpanded = useMemo(() => {
-    if (!expandedMember) return [];
-    void paymentsTick;
-    return getPaymentsForMember(expandedMember);
-  }, [expandedMember, paymentsTick]);
-
-  const openPaymentModal = (member: Member) => {
+  const openRenewalModal = (member: Member) => {
+    const base = renewalBaseDate(member);
+    const periodKey: SubscriptionPeriodKey = "1m";
+    const { newRenewalDate, cost } = extendMembershipPeriod(base, periodKey);
     setPaymentModalMember(member);
-    setPaymentForm((f) => ({ ...f, amount: "89.99" }));
+    setPaymentForm({
+      amount: cost,
+      method: "CARD",
+      periodKey,
+      newRenewalDate,
+    });
+  };
+
+  const handleMemberEditDocument = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !memberEditForm) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("El archivo debe ser una imagen (JPG, PNG, etc.).");
+      return;
+    }
+    if (file.size > 6 * 1024 * 1024) {
+      toast.error("La imagen debe pesar menos de 6 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setMemberEditForm((f) =>
+        f ? { ...f, idDocumentDataUrl: reader.result as string } : f,
+      );
+      toast.success("Documento actualizado en el formulario.");
+    };
+    reader.onerror = () => toast.error("No se pudo leer la imagen.");
+    reader.readAsDataURL(file);
+  };
+
+  const saveMemberEdit = async (member: Member) => {
+    if (!memberEditForm) return;
+    const clientId = clientIdFromMemberId(member.id);
+    if (!clientId) {
+      toast.error("Este miembro no tiene ID de catálogo para actualizar.");
+      return;
+    }
+    const firstName = memberEditForm.firstName.trim();
+    const lastName = memberEditForm.lastName.trim();
+    const national = memberEditForm.phoneNational.trim().replace(/\s+/g, " ");
+    if (!firstName || !lastName || !national) {
+      toast.error("Nombres y teléfono son obligatorios.");
+      return;
+    }
+    const dial = memberEditForm.phoneCountryDial.trim();
+    const phoneDisplay = `+${dial} ${national}`.replace(/\s+$/, "");
+
+    setSavingMemberEdit(true);
+    try {
+      const result = await updateClientUseCase({
+        clientID: clientId,
+        firstName,
+        lastName,
+        email: memberEditForm.email.trim() || undefined,
+        phoneNumber: national,
+        phoneCodeNumber: dial,
+        fullAddress: memberEditForm.address.trim() || undefined,
+        planID: DEFAULT_MEMBER_PLAN_ID,
+        enrollmentDate: memberEditForm.enrollmentDate,
+        renewalDate: memberEditForm.renewalDate,
+        idDocumentDataUrl: memberEditForm.idDocumentDataUrl,
+      });
+      if (!result.ok) {
+        toast.error("No se pudo actualizar", { description: result.message });
+        return;
+      }
+      const row: Member = {
+        ...result.member,
+        phone: phoneDisplay,
+        address: memberEditForm.address.trim() || undefined,
+        idDocumentDataUrl: memberEditForm.idDocumentDataUrl ?? undefined,
+      };
+      setMembers((prev) => {
+        const next = prev.map((m) => (m.id === member.id ? row : m));
+        saveMembers(next);
+        return next;
+      });
+      toast.success("Datos del miembro actualizados");
+    } finally {
+      setSavingMemberEdit(false);
+    }
   };
 
   const registerSubscriptionPayment = async (opts: {
@@ -701,29 +850,105 @@ export default function Members() {
     }
   };
 
-  const submitPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!paymentModalMember) return;
-    const amount = parseFloat(paymentForm.amount);
-    if (Number.isNaN(amount) || amount <= 0) return;
-    const { receipt, synced } = await registerSubscriptionPayment({
-      memberId: paymentModalMember.id,
-      memberName: memberFullName(paymentModalMember),
-      amount,
-      concept: paymentForm.concept,
-      method: paymentForm.method,
+  const applyRenewalDateLocally = (memberId: string, newRenewalDate: string) => {
+    setMembers((prev) => {
+      const next = prev.map((m) =>
+        m.id === memberId ? { ...m, renewalDate: newRenewalDate } : m,
+      );
+      saveMembers(next);
+      return next;
     });
-    if (synced) {
-      toast.success("Pago de suscripción registrado");
-    } else {
-      toast.warning("Pago guardado localmente", {
-        description:
-          "No se pudo sincronizar con el POS API; quedó en almacén local.",
-      });
+  };
+
+  const submitRenewal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentModalMember || submittingRenewal) return;
+
+    const amount = parseFloat(paymentForm.amount);
+    if (Number.isNaN(amount) || amount <= 0) {
+      toast.error("Ingresa un monto válido para la renovación.");
+      return;
     }
-    setPaymentModalMember(null);
-    setSubscriptionTicketReceipt(receipt);
-    setPaymentsTick((t) => t + 1);
+    if (!paymentForm.newRenewalDate) {
+      toast.error("Selecciona un periodo de vigencia.");
+      return;
+    }
+
+    const member = paymentModalMember;
+    const newRenewalDate = paymentForm.newRenewalDate;
+    setSubmittingRenewal(true);
+
+    try {
+      const { receipt, synced } = await registerSubscriptionPayment({
+        memberId: member.id,
+        memberName: memberFullName(member),
+        amount,
+        concept: "RENEWAL",
+        method: paymentForm.method,
+        periodKey: paymentForm.periodKey,
+      });
+
+      setPaymentModalMember(null);
+      setSubscriptionTicketReceipt(receipt);
+
+      if (synced) {
+        toast.success("Membresía renovada", {
+          description: `Pago $${amount.toFixed(2)} registrado en POS.`,
+        });
+      } else {
+        toast.warning("Pago guardado localmente", {
+          description: "No se pudo registrar el cobro en el POS API.",
+        });
+      }
+
+      const clientId = clientIdFromMemberId(member.id);
+      if (clientId) {
+        const digits = normalizePhoneDigits(member.phone ?? "");
+        let dial = "52";
+        let national = digits;
+        if (digits.startsWith("52") && digits.length > 10) {
+          national = digits.slice(2);
+        }
+        const updateResult = await updateClientUseCase({
+          clientID: clientId,
+          firstName: member.firstName,
+          lastName: member.lastName,
+          email: member.email,
+          phoneNumber: national,
+          phoneCodeNumber: dial,
+          fullAddress: member.address,
+          planID: DEFAULT_MEMBER_PLAN_ID,
+          enrollmentDate: member.enrollmentDate,
+          renewalDate: newRenewalDate,
+          idDocumentDataUrl: member.idDocumentDataUrl,
+        });
+        if (updateResult.ok) {
+          setMembers((prev) => {
+            const next = prev.map((m) =>
+              m.id === member.id
+                ? { ...updateResult.member, renewalDate: newRenewalDate }
+                : m,
+            );
+            saveMembers(next);
+            return next;
+          });
+        } else {
+          applyRenewalDateLocally(member.id, newRenewalDate);
+          toast.warning("Vigencia actualizada solo en la app", {
+            description: updateResult.message,
+          });
+        }
+      } else {
+        applyRenewalDateLocally(member.id, newRenewalDate);
+      }
+    } catch (error) {
+      toast.error("No se pudo registrar la renovación", {
+        description:
+          error instanceof Error ? error.message : "Error inesperado al cobrar.",
+      });
+    } finally {
+      setSubmittingRenewal(false);
+    }
   };
 
   const openAddMemberModal = () => {
@@ -875,7 +1100,6 @@ export default function Members() {
           });
         }
         setSubscriptionTicketReceipt(receipt);
-        setPaymentsTick((t) => t + 1);
       }
       setMembersFromApi(true);
       setShowAddMemberModal(false);
@@ -1152,11 +1376,11 @@ export default function Members() {
                     <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full">
                       <button
                         type="button"
-                        onClick={() => openPaymentModal(member)}
+                        onClick={() => openRenewalModal(member)}
                         className="inline-flex items-center justify-center gap-2 bg-[#e31e24] text-white px-4 py-2.5 text-[10px] font-bold tracking-[1px] uppercase hover:bg-[#c41a20] transition-colors"
                       >
                         <Wallet size={14} />
-                        Registrar pago
+                        Renovar membresía
                       </button>
                       <button
                         type="button"
@@ -1287,109 +1511,227 @@ export default function Members() {
                         </div>
                       </div>
 
-                      {/* Activity Stats */}
+                      {/* Estadísticas de actividad */}
                       <div className="w-full min-w-0 bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-5 sm:p-6 md:col-span-2 xl:col-span-1">
                         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
-                          Activity_Stats
+                          Estadísticas de actividad
                         </p>
                         <div className="space-y-4">
                           <div>
-                            <p className="text-[#808080] text-[10px] mb-1">MONTHLY VISITS</p>
+                            <p className="text-[#808080] text-[10px] mb-1">Visitas del mes</p>
                             <p className="text-[#e5e2e1] text-[16px] font-black">{member.monthlyVisits}</p>
                           </div>
                           <div>
-                            <p className="text-[#808080] text-[10px] mb-1">AVG SESSION TIME</p>
-                            <p className="text-[#e5e2e1] text-[16px] font-black">{member.avgSessionTime} MIN</p>
+                            <p className="text-[#808080] text-[10px] mb-1">Tiempo promedio de sesión</p>
+                            <p className="text-[#e5e2e1] text-[16px] font-black">{member.avgSessionTime} min</p>
                           </div>
                           <div>
-                            <p className="text-[#808080] text-[10px] mb-1">MEMBER SINCE</p>
+                            <p className="text-[#808080] text-[10px] mb-1">Miembro desde</p>
                             <p className="text-[#e5e2e1] text-[14px] font-black">
-                              {new Date(member.enrollmentDate).toLocaleDateString('en-US', {
-                                year: 'numeric',
-                                month: 'short'
-                              }).toUpperCase()}
+                              {new Date(member.enrollmentDate).toLocaleDateString("es-MX", {
+                                year: "numeric",
+                                month: "short",
+                              })}
                             </p>
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    {(member.address || member.idDocumentDataUrl) && (
-                      <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
-                        {member.address && (
-                          <div className="w-full min-w-0 bg-[#131313] border border-[rgba(93,63,60,0.1)] p-5">
-                            <p className="flex items-center gap-2 text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-3">
-                              <MapPin size={14} />
-                              Domicilio
-                            </p>
-                            <p className="text-[#e5e2e1] text-[13px] leading-relaxed whitespace-pre-wrap">
-                              {member.address}
-                            </p>
-                          </div>
-                        )}
-                        {member.idDocumentDataUrl && (
-                          <div className="w-full min-w-0 bg-[#131313] border border-[rgba(93,63,60,0.1)] p-5">
-                            <p className="flex items-center gap-2 text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-3">
-                              <IdCard size={14} />
-                              ID · expediente
-                            </p>
-                            <a
-                              href={member.idDocumentDataUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block rounded border border-[rgba(93,63,60,0.2)] overflow-hidden bg-[#131313] hover:border-[#e31e24]/50 transition-colors"
-                            >
-                              <img
-                                src={member.idDocumentDataUrl}
-                                alt={`Identificación ${member.id}`}
-                                className="w-full max-h-[240px] object-contain"
+                    {memberEditForm && (
+                      <div className="w-full min-w-0 bg-[#131313] border border-[rgba(93,63,60,0.12)] p-5 sm:p-6">
+                        <p className="flex items-center gap-2 text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-5">
+                          <Pencil size={14} />
+                          Modificar datos del miembro
+                        </p>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-[#808080] text-[10px] uppercase block mb-1">Nombre</label>
+                                <input
+                                  type="text"
+                                  value={memberEditForm.firstName}
+                                  onChange={(e) =>
+                                    setMemberEditForm((f) =>
+                                      f ? { ...f, firstName: e.target.value } : f,
+                                    )
+                                  }
+                                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2 text-[12px] focus:border-[#e31e24] focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[#808080] text-[10px] uppercase block mb-1">Apellidos</label>
+                                <input
+                                  type="text"
+                                  value={memberEditForm.lastName}
+                                  onChange={(e) =>
+                                    setMemberEditForm((f) =>
+                                      f ? { ...f, lastName: e.target.value } : f,
+                                    )
+                                  }
+                                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2 text-[12px] focus:border-[#e31e24] focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[#808080] text-[10px] uppercase block mb-1">Correo</label>
+                              <input
+                                type="email"
+                                value={memberEditForm.email}
+                                onChange={(e) =>
+                                  setMemberEditForm((f) =>
+                                    f ? { ...f, email: e.target.value } : f,
+                                  )
+                                }
+                                className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2 text-[12px] focus:border-[#e31e24] focus:outline-none"
                               />
-                            </a>
-                            <p className="text-[#393939] text-[9px] mt-2">
-                              Clic para abrir en pestaña nueva.
-                            </p>
+                            </div>
+                            <div className="grid grid-cols-[80px_1fr] gap-2">
+                              <div>
+                                <label className="text-[#808080] text-[10px] uppercase block mb-1">Lada</label>
+                                <input
+                                  type="text"
+                                  value={memberEditForm.phoneCountryDial}
+                                  onChange={(e) =>
+                                    setMemberEditForm((f) =>
+                                      f ? { ...f, phoneCountryDial: e.target.value } : f,
+                                    )
+                                  }
+                                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2 text-[12px] font-mono focus:border-[#e31e24] focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[#808080] text-[10px] uppercase block mb-1">Teléfono</label>
+                                <input
+                                  type="tel"
+                                  value={memberEditForm.phoneNational}
+                                  onChange={(e) =>
+                                    setMemberEditForm((f) =>
+                                      f ? { ...f, phoneNational: e.target.value } : f,
+                                    )
+                                  }
+                                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2 text-[12px] font-mono focus:border-[#e31e24] focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[#808080] text-[10px] uppercase block mb-1">Domicilio</label>
+                              <textarea
+                                value={memberEditForm.address}
+                                onChange={(e) =>
+                                  setMemberEditForm((f) =>
+                                    f ? { ...f, address: e.target.value } : f,
+                                  )
+                                }
+                                rows={2}
+                                className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2 text-[12px] focus:border-[#e31e24] focus:outline-none resize-y"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-[#808080] text-[10px] uppercase block mb-1">Alta</label>
+                                <input
+                                  type="date"
+                                  value={memberEditForm.enrollmentDate}
+                                  onChange={(e) =>
+                                    setMemberEditForm((f) =>
+                                      f ? { ...f, enrollmentDate: e.target.value } : f,
+                                    )
+                                  }
+                                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2 text-[12px] focus:border-[#e31e24] focus:outline-none [color-scheme:dark]"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[#808080] text-[10px] uppercase block mb-1">Renovación</label>
+                                <input
+                                  type="date"
+                                  value={memberEditForm.renewalDate}
+                                  onChange={(e) =>
+                                    setMemberEditForm((f) =>
+                                      f ? { ...f, renewalDate: e.target.value } : f,
+                                    )
+                                  }
+                                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2 text-[12px] focus:border-[#e31e24] focus:outline-none [color-scheme:dark]"
+                                />
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={savingMemberEdit}
+                              onClick={() => void saveMemberEdit(member)}
+                              className="w-full sm:w-auto bg-[#e31e24] text-white px-6 py-2.5 text-[10px] font-bold tracking-[1px] uppercase hover:bg-[#c41a20] transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                            >
+                              {savingMemberEdit ? (
+                                <Loader2 className="animate-spin" size={14} />
+                              ) : (
+                                <Pencil size={14} />
+                              )}
+                              Guardar cambios
+                            </button>
                           </div>
-                        )}
+
+                          <div>
+                            <p className="text-[#808080] text-[10px] uppercase tracking-wide mb-3">
+                              Documentos cargados
+                            </p>
+                            {memberEditForm.idDocumentDataUrl ? (
+                              <div className="space-y-3">
+                                <a
+                                  href={memberEditForm.idDocumentDataUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block rounded border border-[rgba(93,63,60,0.25)] overflow-hidden bg-[#0e0e0e] hover:border-[#e31e24]/50 transition-colors"
+                                >
+                                  <img
+                                    src={memberEditForm.idDocumentDataUrl}
+                                    alt={`Identificación ${member.id}`}
+                                    className="w-full max-h-[280px] object-contain"
+                                  />
+                                </a>
+                                <p className="text-[#808080] text-[10px]">
+                                  Identificación oficial · clic para abrir en tamaño completo
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="text-[#5a5a5a] text-[12px] mb-3">
+                                No hay documentos en el expediente. Sube una identificación.
+                              </p>
+                            )}
+                            <input
+                              ref={memberEditFileRef}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={handleMemberEditDocument}
+                            />
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              <button
+                                type="button"
+                                onClick={() => memberEditFileRef.current?.click()}
+                                className="inline-flex items-center gap-2 bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] px-4 py-2 text-[10px] font-bold uppercase tracking-wide hover:border-[#e31e24] transition-colors"
+                              >
+                                <Upload size={14} />
+                                {memberEditForm.idDocumentDataUrl ? "Reemplazar documento" : "Subir documento"}
+                              </button>
+                              {memberEditForm.idDocumentDataUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setMemberEditForm((f) =>
+                                      f ? { ...f, idDocumentDataUrl: null } : f,
+                                    )
+                                  }
+                                  className="text-[#808080] hover:text-[#e31e24] text-[10px] font-bold uppercase tracking-wide px-2"
+                                >
+                                  Quitar
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
-
-                    {/* Payment history — demo store */}
-                    <div className="w-full min-w-0 bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 sm:p-6">
-                      <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
-                        Historial de pagos (membresía)
-                      </p>
-                      {paymentsForExpanded.length === 0 ? (
-                        <p className="text-[#808080] text-[12px]">Sin pagos registrados.</p>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-[11px]">
-                            <thead>
-                              <tr className="text-[#808080] uppercase border-b border-[rgba(93,63,60,0.2)]">
-                                <th className="pb-2 pr-4">Fecha</th>
-                                <th className="pb-2 pr-4">Concepto</th>
-                                <th className="pb-2 pr-4">Método</th>
-                                <th className="pb-2 text-right">Monto</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {paymentsForExpanded.map((p) => (
-                                <tr key={p.id} className="border-b border-[rgba(93,63,60,0.06)] text-[#e5e2e1]">
-                                  <td className="py-2 pr-4 font-mono text-[#808080]">
-                                    {new Date(p.dateIso).toLocaleString("es-MX", {
-                                      dateStyle: "short",
-                                      timeStyle: "short",
-                                    })}
-                                  </td>
-                                  <td className="py-2 pr-4">{p.concept}</td>
-                                  <td className="py-2 pr-4">{p.method}</td>
-                                  <td className="py-2 text-right font-bold">${p.amount.toFixed(2)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )}
               </div>
@@ -1454,22 +1796,22 @@ export default function Members() {
 
       {paymentModalMember && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#131313] border border-[rgba(93,63,60,0.2)] p-6 md:p-8 max-w-md w-full">
+          <div className="bg-[#131313] border border-[rgba(93,63,60,0.2)] p-6 md:p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-start mb-6">
               <div>
                 <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">
-                  Registro de pago
+                  Renovación de membresía
                 </p>
                 <h3 className="text-[#e5e2e1] text-[16px] font-black uppercase leading-tight">
                   {memberFullName(paymentModalMember)}
                 </h3>
                 <p className="text-[#808080] text-[11px] font-mono mt-1">{paymentModalMember.id}</p>
-                <p className="text-[#e5e2e1] text-[11px] font-mono mt-1">{paymentModalMember.phone}</p>
-                {paymentModalMember.email && (
-                  <p className="text-[#808080] text-[10px] mt-0.5 truncate max-w-[280px]" title={paymentModalMember.email}>
-                    {paymentModalMember.email}
-                  </p>
-                )}
+                <p className="text-[#a8a4a3] text-[11px] mt-2">
+                  Vigencia actual hasta{" "}
+                  <span className="text-[#e5e2e1] font-bold">
+                    {formatRenewalDate(paymentModalMember.renewalDate)}
+                  </span>
+                </p>
               </div>
               <button
                 type="button"
@@ -1480,10 +1822,55 @@ export default function Members() {
                 <X size={22} />
               </button>
             </div>
-            <form onSubmit={submitPayment} className="space-y-4">
+            <form onSubmit={submitRenewal} className="space-y-4">
               <div>
                 <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                  Monto (USD)
+                  Periodo de vigencia
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {SUBSCRIPTION_PERIOD_OPTIONS.map(({ key, label }) => {
+                    const active = paymentForm.periodKey === key;
+                    const price = getSubscriptionPrice(key);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          const base = renewalBaseDate(paymentModalMember);
+                          const { newRenewalDate, cost } = extendMembershipPeriod(base, key);
+                          setPaymentForm((f) => ({
+                            ...f,
+                            periodKey: key,
+                            amount: cost,
+                            newRenewalDate,
+                          }));
+                        }}
+                        className={`px-3 py-2 text-[10px] font-bold border transition-colors ${
+                          active
+                            ? "bg-[#e31e24]/15 border-[#e31e24]/50 text-white"
+                            : "bg-[#0e0e0e] border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24]"
+                        }`}
+                      >
+                        <span className="block uppercase tracking-wide">{label}</span>
+                        <span className="block text-[11px] mt-0.5 tabular-nums">
+                          ${price.toLocaleString("es-MX")}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] px-4 py-3">
+                <p className="text-[#808080] text-[10px] uppercase tracking-wide mb-1">
+                  Nueva vigencia hasta
+                </p>
+                <p className="text-[#e5e2e1] text-[15px] font-black">
+                  {formatRenewalDate(paymentForm.newRenewalDate)}
+                </p>
+              </div>
+              <div>
+                <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                  Monto (MXN)
                 </label>
                 <input
                   type="number"
@@ -1494,29 +1881,13 @@ export default function Members() {
                   className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none font-['Space_Grotesk',sans-serif]"
                   required
                 />
+                <p className="text-[#5a5a5a] text-[10px] mt-1">
+                  Se actualiza al elegir el periodo; puedes ajustarlo si aplica descuento.
+                </p>
               </div>
               <div>
                 <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                  Concepto
-                </label>
-                <select
-                  value={paymentForm.concept}
-                  onChange={(e) =>
-                    setPaymentForm({
-                      ...paymentForm,
-                      concept: e.target.value as typeof paymentForm.concept,
-                    })
-                  }
-                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none"
-                >
-                  <option value="MEMBERSHIP">Membresía</option>
-                  <option value="RENEWAL">Renovación</option>
-                  <option value="OTHER">Otro</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                  Método
+                  Método de pago
                 </label>
                 <select
                   value={paymentForm.method}
@@ -1543,9 +1914,17 @@ export default function Members() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] transition-colors"
+                  disabled={submittingRenewal}
+                  className="flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
                 >
-                  Guardar
+                  {submittingRenewal ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      Procesando…
+                    </>
+                  ) : (
+                    "Confirmar renovación"
+                  )}
                 </button>
               </div>
             </form>

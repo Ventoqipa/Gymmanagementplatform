@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ScanFace,
   Shield,
@@ -21,6 +21,8 @@ import {
   type AccessEnrollmentRecord,
 } from "../lib/demoStore";
 import { mockFaceIdEnroll, mockFaceIdVerify, mockTurnstileCommand } from "../lib/thirdPartyMocks";
+import type { AccessLogEntry } from "../lib/demoStore";
+import { buildUnknownCaptureDataUrl } from "../lib/accessCaptureImage";
 
 type EnrollPhase = "idle" | "capturing" | "registering";
 
@@ -51,10 +53,21 @@ export default function AccessControl() {
     return { granted, denied, total, rate };
   }, [log]);
 
+  const liveFeed = useMemo(() => log.slice(0, 12), [log]);
+  const latestAccess = liveFeed[0] ?? null;
+
   const refreshFromStore = () => {
     setLog(getAccessLog());
     setTurnstiles(getTurnstileStates());
   };
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "elite_gym_v1_access_log") refreshFromStore();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   const simulateScan = async () => {
     setBusy(true);
@@ -85,6 +98,8 @@ export default function AccessControl() {
           terminalId: selectedTerminal,
           faceIdVendorRequestId: face.vendorRequestId,
           turnstileVendorCommandId: open.vendorCommandId,
+          captureSnapshotUrl: face.captureSnapshotUrl,
+          confidence: face.confidence,
         });
         window.setTimeout(() => {
           void mockTurnstileCommand({
@@ -112,6 +127,8 @@ export default function AccessControl() {
           terminalId: selectedTerminal,
           faceIdVendorRequestId: face.vendorRequestId,
           turnstileVendorCommandId: "ts_hold",
+          captureSnapshotUrl: face.captureSnapshotUrl,
+          confidence: face.confidence,
         });
       }
     } finally {
@@ -164,6 +181,9 @@ export default function AccessControl() {
   const formatShort = (iso: string) =>
     new Date(iso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" });
 
+  const snapshotFor = (row: AccessLogEntry) =>
+    row.captureSnapshotUrl ?? buildUnknownCaptureDataUrl();
+
   return (
     <div className="h-full bg-[#131313] p-4 md:p-6 overflow-auto">
       <div className="mb-3 md:mb-4">
@@ -173,6 +193,109 @@ export default function AccessControl() {
         <p className="text-[#808080] text-[11px] mt-1 max-w-3xl leading-relaxed">
           Control de accesos por reconocimiento facial y sincronización con torniquetes en tiempo real.
         </p>
+      </div>
+
+      <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4 md:p-6 mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <Camera className="text-[#e31e24]" size={20} />
+            <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
+              Monitor en vivo
+            </p>
+            <span className="inline-flex items-center gap-1 text-[9px] uppercase text-[#00ff00] font-bold">
+              <span className="w-2 h-2 rounded-full bg-[#00ff00] animate-pulse" />
+              Live
+            </span>
+          </div>
+          <p className="text-[#5a5a5a] text-[10px]">
+            Instantánea por intento de acceso · actualiza al escanear en cualquier terminal
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div
+            className={`lg:col-span-1 border-2 p-3 ${
+              latestAccess?.result === "DENIED"
+                ? "border-[#e31e24]"
+                : latestAccess
+                  ? "border-[#00ff00]"
+                  : "border-[rgba(93,63,60,0.2)]"
+            }`}
+          >
+            <p className="text-[9px] uppercase tracking-wider text-[#808080] mb-2">Último intento</p>
+            {latestAccess ? (
+              <>
+                <div className="aspect-square bg-[#1a1a1a] overflow-hidden mb-3">
+                  <img
+                    src={snapshotFor(latestAccess)}
+                    alt={`Captura ${latestAccess.memberName}`}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <p
+                  className={`text-[11px] font-black uppercase ${
+                    latestAccess.result === "GRANTED" ? "text-[#00ff00]" : "text-[#e31e24]"
+                  }`}
+                >
+                  {latestAccess.result}
+                </p>
+                <p className="text-[#e5e2e1] text-[15px] font-bold mt-1">{latestAccess.memberName}</p>
+                <p className="text-[#808080] text-[10px] font-mono mt-1">{latestAccess.terminalId}</p>
+                {latestAccess.confidence != null && (
+                  <p className="text-[#5a5a5a] text-[10px] mt-1">
+                    Confianza {(latestAccess.confidence * 100).toFixed(1)}%
+                  </p>
+                )}
+                <p className="text-[#393939] text-[9px] mt-2">{formatTime(latestAccess.timestampIso)}</p>
+              </>
+            ) : (
+              <div className="aspect-square bg-[#1a1a1a] flex items-center justify-center text-[#5a5a5a] text-[12px] text-center px-4">
+                Sin capturas aún. Escanee un rostro o espere eventos del lector.
+              </div>
+            )}
+          </div>
+
+          <div className="lg:col-span-2">
+            <p className="text-[9px] uppercase tracking-wider text-[#808080] mb-3">Últimos rostros</p>
+            {liveFeed.length === 0 ? (
+              <p className="text-[#5a5a5a] text-[12px]">El muro de accesos se llenará en tiempo real.</p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[420px] overflow-auto pr-1">
+                {liveFeed.map((row) => (
+                  <div
+                    key={row.id}
+                    className={`bg-[#1a1a1a] border overflow-hidden ${
+                      row.result === "GRANTED"
+                        ? "border-[rgba(0,255,0,0.25)]"
+                        : "border-[rgba(227,30,36,0.35)]"
+                    }`}
+                  >
+                    <div className="aspect-square relative">
+                      <img
+                        src={snapshotFor(row)}
+                        alt={row.memberName}
+                        className="w-full h-full object-cover"
+                      />
+                      <span
+                        className={`absolute top-1 right-1 text-[8px] font-bold px-1.5 py-0.5 uppercase ${
+                          row.result === "GRANTED"
+                            ? "bg-[#00ff00] text-[#0e0e0e]"
+                            : "bg-[#e31e24] text-white"
+                        }`}
+                      >
+                        {row.result === "GRANTED" ? "OK" : "NO"}
+                      </span>
+                    </div>
+                    <div className="p-2">
+                      <p className="text-[#e5e2e1] text-[10px] font-bold truncate">{row.memberName}</p>
+                      <p className="text-[#5a5a5a] text-[9px] font-mono">{formatTime(row.timestampIso)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 mb-6">
@@ -441,6 +564,11 @@ export default function AccessControl() {
                 className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 py-3 border-b border-[rgba(93,63,60,0.05)]"
               >
                 <div className="flex flex-wrap items-center gap-2 lg:gap-4">
+                  <img
+                    src={snapshotFor(row)}
+                    alt=""
+                    className="w-10 h-10 object-cover border border-[rgba(93,63,60,0.2)] shrink-0"
+                  />
                   <span
                     className={`text-[10px] font-bold tracking-[1px] uppercase ${
                       row.result === "GRANTED" ? "text-[#00ff00]" : "text-[#e31e24]"

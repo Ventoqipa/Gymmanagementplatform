@@ -33,6 +33,9 @@ export type AccessLogEntry = {
   terminalId: string;
   faceIdVendorRequestId: string;
   turnstileVendorCommandId: string;
+  /** Instantánea del intento en el lector (JPEG/PNG en CDN o /snapshots/{id}). */
+  captureSnapshotUrl?: string;
+  confidence?: number;
 };
 
 export type TurnstileState = {

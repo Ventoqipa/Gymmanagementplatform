@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Activity, DollarSign, Loader2, TrendingUp, Users } from "lucide-react";
 import type { PosSale } from "@/features/pos";
 import { getGymPosService } from "../config/gymPosService";
-import { localDateIso } from "../lib/labels";
+import { formatActivityDetail, localDateIso } from "../lib/labels";
 import {
   buildRecentActivity,
   buildRevenueToday,
@@ -184,7 +184,7 @@ export default function Dashboard() {
                   </span>
                   <span className="text-[#e5e2e1] text-[12px] font-bold">{row.name}</span>
                   <span className="text-[#808080] text-[10px] tracking-[1px] uppercase">
-                    {row.tier}
+                    {formatActivityDetail(row.action, row.tier)}
                   </span>
                 </div>
                 <span className="text-[#808080] text-[10px]">{row.time}</span>

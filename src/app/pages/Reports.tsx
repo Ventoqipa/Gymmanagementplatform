@@ -274,15 +274,17 @@ export default function Reports() {
                           {PAYMENT_METHOD[s.method] ?? s.method}
                         </span>
                       </div>
-                      <p className="text-[#808080] text-[11px] mt-1">{s.linesSummary}</p>
+                      <p className="text-[#d8d4d3] text-[12px] mt-1 leading-snug">
+                        {s.linesSummary}
+                      </p>
                       {tab === "subscriptions" && s.subscriptionConcept && (
-                        <p className="text-[#5a5a5a] text-[10px] mt-1">
+                        <p className="text-[#b8b4b3] text-[11px] mt-1">
                           {MEMBERSHIP_CONCEPT[s.subscriptionConcept] ?? s.subscriptionConcept}
                           {s.periodKey ? ` · ${s.periodKey}` : ""}
                         </p>
                       )}
                       {s.memberName && (
-                        <p className="text-[#393939] text-[10px] mt-1 font-mono">
+                        <p className="text-[#a8a4a3] text-[10px] mt-1 font-mono">
                           {s.memberName} ({s.memberId})
                         </p>
                       )}

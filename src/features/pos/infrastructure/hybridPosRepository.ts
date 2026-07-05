@@ -91,6 +91,12 @@ export class HybridPosRepository implements PosRepository {
     try {
       return await this.remote.checkoutSubscription(input);
     } catch (error) {
+      if (
+        error instanceof PosApiError &&
+        (error.statusCode === 404 || error.statusCode === 0 || error.statusCode >= 500)
+      ) {
+        return this.local.checkoutSubscription(input);
+      }
       if (!this.shouldFallback(error)) throw error;
       return this.local.checkoutSubscription(input);
     }

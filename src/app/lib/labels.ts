@@ -23,6 +23,25 @@ export const MEMBERSHIP_CONCEPT: Record<string, string> = {
   OTHER: "Otro",
 };
 
+export const MEMBERSHIP_TIER: Record<string, string> = {
+  ELITE_BLK: "Elite",
+  PLATINUM_ELITE: "Platinum",
+  GOLD: "Gold",
+  BASIC: "Básico",
+  INACTIVE: "Inactivo",
+};
+
+/** Etiqueta secundaria en actividad reciente (método de pago, plan, concepto). */
+export function formatActivityDetail(action: string, detail: string): string {
+  if (action === ACTIVITY.MEMBERSHIP_PAYMENT) {
+    return MEMBERSHIP_CONCEPT[detail] ?? detail;
+  }
+  if (action === ACTIVITY.CARRITO_COMPRAS) {
+    return PAYMENT_METHOD[detail] ?? detail;
+  }
+  return MEMBERSHIP_TIER[detail] ?? detail;
+}
+
 export const ACCESS_RESULT: Record<string, string> = {
   GRANTED: "Permitido",
   DENIED: "Denegado",
