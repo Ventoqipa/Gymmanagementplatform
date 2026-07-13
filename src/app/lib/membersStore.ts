@@ -18,6 +18,12 @@ export type Member = {
   idDocumentDataUrl?: string;
   faceIdEnrolled?: boolean;
   faceIdTemplateId?: string;
+  /** Cargo recurrente domiciliado en tarjeta/cuenta (catálogo isDirectDebit). */
+  isDirectDebit?: boolean;
+  regularPrice?: number;
+  directDebitPrice?: number;
+  /** Fecha de alta en catálogo (DateAdded); orden de lista = más reciente primero. */
+  dateAdded?: string | null;
 };
 
 export function loadMembers(): Member[] {

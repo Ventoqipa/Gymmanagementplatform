@@ -299,18 +299,22 @@ export function usePosTerminal() {
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
+  const sessionPayer = config.getSessionPayer?.() ?? null;
+
   const handleCheckout = async () => {
     if (cart.length === 0 || !paymentMethod) return;
     const member: LinkedCustomer | undefined =
       selectedCustomer?.id && selectedCustomer?.name
         ? { id: selectedCustomer.id, name: selectedCustomer.name }
         : undefined;
+    const payer = config.getSessionPayer?.() ?? undefined;
     try {
       const result = await service.checkout(
         cart,
         paymentMethod,
         member,
         config.ivaRegimen,
+        payer ?? undefined,
       );
       setProducts(result.products);
       setTicketReceipt(result.receipt);
@@ -367,6 +371,7 @@ export function usePosTerminal() {
     refreshProducts,
     previewSku,
     total,
+    sessionPayer,
     handleAddProduct,
     openEditProduct,
     closeEditProduct,

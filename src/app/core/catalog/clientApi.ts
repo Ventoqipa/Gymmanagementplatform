@@ -87,10 +87,13 @@ export function buildClientPayload(
   const hasPhoto = Boolean(input.idDocumentDataUrl?.trim());
   const docExtension = hasPhoto
     ? dataUrlToExtension(input.idDocumentDataUrl!)
-    : "-";
-  const docBase64 = hasPhoto ? dataUrlToBase64(input.idDocumentDataUrl!) : "-";
+    : null;
+  const docBase64 = hasPhoto ? dataUrlToBase64(input.idDocumentDataUrl!) : null;
 
   const renewalIso = toIsoDateTime(input.renewalDate);
+  const isDirectDebit = Boolean(input.isDirectDebit);
+  const regularPrice = Math.max(0, input.regularPrice ?? 0);
+  const directDebitPrice = Math.max(0, input.directDebitPrice ?? 0);
 
   return {
     clientID: clientId,
@@ -108,9 +111,9 @@ export function buildClientPayload(
     stateID: catalogConfig.defaults.stateId,
     municipalityID: catalogConfig.defaults.municipalityId,
 
-    email: dashStr(email),
-    phoneCodeNumber: phoneCode,
-    phoneNumber: phone,
+    email: email ?? "",
+    phoneCodeNumber: phone ? phoneCode : emergencyNational ? emergencyCode : phoneCode,
+    phoneNumber: phone || "-",
     phoneCodeNumberEmergency: emergencyCode,
     phoneNumberEmergency: emergencyNational || "-",
 
@@ -125,6 +128,11 @@ export function buildClientPayload(
     DocFileName: null,
     DocExtensionName: docExtension,
     DocBase64: docBase64,
+
+    isDirectDebit,
+    // Reglas API: RegularPrice si IsDirectDebit=false; DirectDebitPrice si true.
+    regularPrice: isDirectDebit ? 0 : regularPrice,
+    directDebitPrice: isDirectDebit ? directDebitPrice : 0,
   };
 }
 

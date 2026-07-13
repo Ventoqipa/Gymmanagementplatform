@@ -3,7 +3,9 @@
 Documento de referencia para **Elite Gym 24/7**: cómo controlar dispositivos ZKTeco, validar vigencia de membresía y operar torniquetes. Combina el hallazgo de campo (PDFs de discovery) con el diseño de la plataforma web y el trabajo pendiente de integración real.
 
 **Última actualización:** junio 2026  
-**Relacionado:** `README-FUNCIONALIDAD.md`, `README-TECNICO.md`, `src/app/lib/thirdPartyMocks.ts`
+**Relacionado:** `README-FUNCIONALIDAD.md`, `README-TECNICO.md`, `docs/INTEGRACION-TORNIQUETE.md`, `src/app/lib/thirdPartyMocks.ts`
+
+> **Torniquete:** integración física pendiente. Ver [INTEGRACION-TORNIQUETE.md](./INTEGRACION-TORNIQUETE.md) para contrato, checklist y sustitución de mocks.
 
 ---
 

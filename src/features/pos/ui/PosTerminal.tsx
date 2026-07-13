@@ -237,6 +237,15 @@ export function PosTerminal() {
           <h1 className="text-[#e5e2e1] text-[22px] md:text-[30px] font-black tracking-[-0.5px] uppercase leading-tight">
             {labels.title}
           </h1>
+          {pos.sessionPayer?.name ? (
+            <p className="text-[#808080] text-[11px] mt-2">
+              {labels.ticketPayer}:{" "}
+              <span className="text-[#e5e2e1] font-semibold">{pos.sessionPayer.name}</span>
+              {pos.sessionPayer.id ? (
+                <span className="font-mono text-[#a8a4a3] ml-1">({pos.sessionPayer.id})</span>
+              ) : null}
+            </p>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

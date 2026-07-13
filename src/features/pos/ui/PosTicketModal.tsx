@@ -57,7 +57,7 @@ export function PosTicketModal({
           {receipt.payer?.name && (
             <div className="text-[12px] border-b border-[#ddd] pb-3">
               <p className="font-bold uppercase text-[10px] text-[#e31e24]">
-                Pagador
+                {labels.ticketPayer}
               </p>
               <p className="font-bold">{receipt.payer.name}</p>
               {receipt.payer.id && (

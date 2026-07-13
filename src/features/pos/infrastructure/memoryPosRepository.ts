@@ -53,6 +53,7 @@ function buildReceipt(
     total,
     paymentMethod: input.paymentMethod,
     member: input.member,
+    payer: input.payer,
     createdIso: new Date().toISOString(),
     ivaRegimen: regimen,
     ivaRate,
@@ -70,6 +71,8 @@ function buildReceipt(
     linesSummary: receipt.lines.map((l) => `${l.qty}× ${l.name}`).join(" · "),
     memberId: input.member?.id,
     memberName: input.member?.name,
+    payerId: input.payer?.id,
+    payerName: input.payer?.name,
     ivaRegimen: regimen,
     ivaRate,
     lines: input.lines.map((c) => ({

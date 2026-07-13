@@ -112,6 +112,16 @@ export function clientToMember(
     idDocumentDataUrl: readDocDataUrl(client),
     faceIdEnrolled: faceId ? true : undefined,
     faceIdTemplateId: faceId || undefined,
+    isDirectDebit: client.isDirectDebit === true ? true : undefined,
+    regularPrice:
+      client.isDirectDebit !== true && client.regularPrice != null
+        ? Number(client.regularPrice)
+        : undefined,
+    directDebitPrice:
+      client.isDirectDebit === true && client.directDebitPrice != null
+        ? Number(client.directDebitPrice)
+        : undefined,
+    dateAdded: client.dateAdded?.trim() || null,
   };
 }
 

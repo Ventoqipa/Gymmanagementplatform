@@ -8,7 +8,7 @@ El POS es el módulo `src/features/pos/` dentro de la misma app React. **Product
 
 ```
 elitegym247.tanosi.com.mx          → App completa (Panel, Miembros, Tienda, Reportes)
-elitegym247.pos.tanosi.com.mx      → POS API REST + (opcional) misma app dist/ para cajeros
+elitegym247.pos.tanosi.com.mx      → POS API REST + (opcional) misma app dist/ para vendedores
 
 Dentro de la app (Tienda):
   Productos  → GET  /pos-api/api/v1/products
@@ -104,7 +104,7 @@ POST https://elitegym247.tanosi.com.mx/pos-api/api/v1/sales/checkout
 npm run build
 ```
 
-Sube `dist/` a `elitegym247.tanosi.com.mx` (y opcionalmente al subdominio POS para URL dedicada de cajeros).
+Sube `dist/` a `elitegym247.tanosi.com.mx` (y opcionalmente al subdominio POS para URL dedicada de vendedores).
 
 Archivos obligatorios: `index.html`, `web.config`, `api-proxy.php`.
 

@@ -24,8 +24,13 @@ export type CatalogClientWritePayload = {
   DateRenewal: string;
   DateExpiration: string;
   DocFileName: string | null;
-  DocExtensionName: string;
-  DocBase64: string;
+  DocExtensionName: string | null;
+  DocBase64: string | null;
+  isDirectDebit?: boolean | null;
+  /** Precio regular cuando isDirectDebit es false. */
+  regularPrice?: number;
+  /** Precio domiciliado cuando isDirectDebit es true. */
+  directDebitPrice?: number;
 };
 
 /** Respuesta GET / listado (acepta nombres legacy y actuales). */
@@ -83,6 +88,11 @@ export type AddClientInput = {
   enrollmentDate: string;
   renewalDate: string;
   idDocumentDataUrl?: string | null;
+  isDirectDebit?: boolean;
+  /** Precio regular (IsDirectDebit = false). */
+  regularPrice?: number;
+  /** Precio domiciliado (IsDirectDebit = true). */
+  directDebitPrice?: number;
 };
 
 export type UpdateClientInput = AddClientInput & {

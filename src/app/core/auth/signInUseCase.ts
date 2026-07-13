@@ -1,5 +1,6 @@
 import { securityConfig } from "../../config/security";
-import { getClientIpAddress } from "./getClientIpAddress";
+import { buildSignInRequestBody } from "./buildSignInRequestBody";
+import { resolveSignInIpAddress } from "./resolveSignInIpAddress";
 import { SecurityApiError, postSignIn } from "./securityApiClient";
 import type { SignInSession } from "./types";
 
@@ -43,20 +44,19 @@ export async function signInUseCase(
     return { ok: false, message: validationError };
   }
 
-  const ipAddress =
-    securityConfig.signInIpAddress || (await getClientIpAddress()).trim();
-  if (!ipAddress) {
-    return { ok: false, message: "No se pudo determinar la dirección IP." };
+  const ipResult = await resolveSignInIpAddress();
+  if (!ipResult.ok) {
+    return { ok: false, message: ipResult.message };
   }
 
   try {
-    const session = await postSignIn({
-      hermesID: input.hermesID.trim(),
-      userPass: input.userPass,
-      ipAddress,
-      typeAccess: securityConfig.typeAccess,
-      appID: securityConfig.appId,
-    });
+    const session = await postSignIn(
+      buildSignInRequestBody({
+        hermesID: input.hermesID.trim(),
+        userPass: input.userPass,
+        ipAddress: ipResult.ipAddress,
+      }),
+    );
 
     return { ok: true, session };
   } catch (error) {

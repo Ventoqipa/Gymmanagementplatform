@@ -64,6 +64,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ...result.session.authenticatedUser,
           hermesID:
             result.session.authenticatedUser?.hermesID?.trim() || usuario.trim(),
+          userFullName:
+            result.session.authenticatedUser?.userFullName?.trim() ||
+            result.session.authenticatedUser?.hermesID?.trim() ||
+            usuario.trim(),
         },
       };
 

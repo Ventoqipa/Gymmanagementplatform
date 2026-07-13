@@ -61,4 +61,11 @@ export {
   ticketIdFromSaleId,
 } from "./domain/subscriptionReceipt";
 export { summarizePosSales } from "./domain/summarizeSales";
+export {
+  filterSalesByPayer,
+  payerKeyFromSale,
+  payerLabelFromSale,
+  summarizeSalesByPayer,
+} from "./domain/summarizeSalesByPayer";
+export type { PayerSalesSummary } from "./domain/summarizeSalesByPayer";
 export { posConfig, getPosApiUrl } from "./config";

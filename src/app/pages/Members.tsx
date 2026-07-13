@@ -21,7 +21,8 @@ import {
   Phone,
   Pencil,
 } from "lucide-react";
-import { addClientUseCase, listClientsUseCase, updateClientUseCase, clientIdFromMemberId } from "../core/catalog";
+import { addClientUseCase, listClientsUseCase, updateClientUseCase, clientIdFromMemberId, sortMembersByDateAddedDesc } from "../core/catalog";
+import { getSessionPayer } from "../core/auth/authStorage";
 import {
   getSubscriptionPrice,
   type SubscriptionPeriodKey,
@@ -51,6 +52,12 @@ function memberFullName(m: Pick<Member, "firstName" | "lastName">): string {
 
 function normalizePhoneDigits(phone: string): string {
   return phone.replace(/\D/g, "");
+}
+
+const MIN_NATIONAL_PHONE_DIGITS = 10;
+
+function isValidNationalPhone(national: string): boolean {
+  return normalizePhoneDigits(national).length >= MIN_NATIONAL_PHONE_DIGITS;
 }
 
 function whatsAppHref(phone: string): string {
@@ -429,6 +436,7 @@ const emptyNewMemberForm = () => {
     selectedPeriodKey: defaultPeriod as SubscriptionPeriodKey | null,
     subscriptionCost: cost,
     payNow: true,
+    directDebit: false,
     paymentMethod: "CARD" as "CASH" | "CARD" | "QR",
     enrollmentDate: today,
     renewalDate,
@@ -706,10 +714,13 @@ export default function Members() {
   }, [searchMatchedMembers]);
 
   const filteredMembers = useMemo(() => {
-    if (filterExpiry === "ALL") return searchMatchedMembers;
-    return searchMatchedMembers.filter(
-      (member) => getExpiryLevel(member.renewalDate) === filterExpiry,
-    );
+    const list =
+      filterExpiry === "ALL"
+        ? searchMatchedMembers
+        : searchMatchedMembers.filter(
+            (member) => getExpiryLevel(member.renewalDate) === filterExpiry,
+          );
+    return sortMembersByDateAddedDesc(list);
   }, [searchMatchedMembers, filterExpiry]);
 
   // Pagination
@@ -791,6 +802,11 @@ export default function Members() {
         enrollmentDate: memberEditForm.enrollmentDate,
         renewalDate: memberEditForm.renewalDate,
         idDocumentDataUrl: memberEditForm.idDocumentDataUrl,
+        isDirectDebit: member.isDirectDebit === true,
+        regularPrice:
+          member.isDirectDebit === true ? 0 : (member.regularPrice ?? 0),
+        directDebitPrice:
+          member.isDirectDebit === true ? (member.directDebitPrice ?? 0) : 0,
       });
       if (!result.ok) {
         toast.error("No se pudo actualizar", { description: result.message });
@@ -821,6 +837,7 @@ export default function Members() {
     concept: SubscriptionConcept;
     periodKey?: string | null;
   }): Promise<{ receipt: PosTicketReceipt; synced: boolean }> => {
+    const payer = getSessionPayer();
     const checkoutInput = {
       memberId: opts.memberId,
       memberName: opts.memberName,
@@ -828,6 +845,8 @@ export default function Members() {
       paymentMethod: opts.method,
       concept: opts.concept,
       periodKey: opts.periodKey ?? undefined,
+      payerId: payer?.id,
+      payerName: payer?.name,
     };
     try {
       const { receipt } =
@@ -921,6 +940,11 @@ export default function Members() {
           enrollmentDate: member.enrollmentDate,
           renewalDate: newRenewalDate,
           idDocumentDataUrl: member.idDocumentDataUrl,
+          isDirectDebit: member.isDirectDebit === true,
+          regularPrice:
+            member.isDirectDebit === true ? 0 : (member.regularPrice ?? 0),
+          directDebitPrice:
+            member.isDirectDebit === true ? (member.directDebitPrice ?? 0) : 0,
         });
         if (updateResult.ok) {
           setMembers((prev) => {
@@ -965,26 +989,50 @@ export default function Members() {
     const emailNorm = emailRaw.toLowerCase();
     const dial = newMemberForm.phoneCountryDial.trim();
     const national = newMemberForm.phoneNational.trim().replace(/\s+/g, " ");
+    const emergencyNational = newMemberForm.emergencyPhoneNational
+      .trim()
+      .replace(/\s+/g, " ");
 
-    if (!firstName || !lastName || !national) {
-      toast.error("Nombres, apellidos y número de teléfono son obligatorios.");
+    if (!firstName || !lastName) {
+      toast.error("Nombres y apellidos son obligatorios.");
+      return;
+    }
+
+    const hasMemberPhone = isValidNationalPhone(national);
+    const hasEmergencyPhone = isValidNationalPhone(emergencyNational);
+
+    if (!hasMemberPhone) {
+      toast.error("El teléfono de contacto del miembro es obligatorio.");
       return;
     }
 
     const localDigits = normalizePhoneDigits(national);
-    if (!localDigits.length) {
-      toast.error("Ingresa el número (sin repetir el prefijo del país).");
+    const fullDigits = `${dial}${localDigits}`;
+    if (fullDigits.length < 11) {
+      toast.error("El teléfono del miembro parece incompleto. Revisa prefijo y dígitos.");
       return;
     }
 
-    const fullDigits = `${dial}${localDigits}`;
-    if (fullDigits.length < 11) {
-      toast.error("El número parece incompleto. Revisa el prefijo del país y los dígitos.");
+    if (emergencyNational && !hasEmergencyPhone) {
+      toast.error("El teléfono de emergencia parece incompleto.");
       return;
     }
+
+    const emergencyDigits = hasEmergencyPhone
+      ? normalizePhoneDigits(emergencyNational)
+      : "";
+    const emergencyFullDigits = emergencyDigits ? `${dial}${emergencyDigits}` : "";
 
     if (members.some((m) => normalizePhoneDigits(m.phone ?? "") === fullDigits)) {
       toast.error("Ya existe un miembro con ese número.");
+      return;
+    }
+
+    if (
+      emergencyFullDigits &&
+      members.some((m) => normalizePhoneDigits(m.phone ?? "") === emergencyFullDigits)
+    ) {
+      toast.error("Ya existe un miembro con ese teléfono de emergencia.");
       return;
     }
 
@@ -1009,19 +1057,15 @@ export default function Members() {
       return;
     }
     const paymentAmount = parseFloat(newMemberForm.subscriptionCost);
-    if (newMemberForm.payNow && (Number.isNaN(paymentAmount) || paymentAmount <= 0)) {
-      toast.error("Indica un costo de suscripción válido para registrar el pago.");
+    if (Number.isNaN(paymentAmount) || paymentAmount <= 0) {
+      toast.error(
+        newMemberForm.directDebit
+          ? "Indica un costo de suscripción válido para el pago domiciliado."
+          : "Indica un costo de suscripción válido (precio regular).",
+      );
       return;
     }
     const addressTrim = newMemberForm.address.trim();
-    const emergencyNational = newMemberForm.emergencyPhoneNational.trim().replace(/\s+/g, " ");
-    if (emergencyNational) {
-      const emergencyDigits = normalizePhoneDigits(emergencyNational);
-      if (emergencyDigits.length < 10) {
-        toast.error("El teléfono de emergencia parece incompleto.");
-        return;
-      }
-    }
     setSavingNewMember(true);
 
     try {
@@ -1031,33 +1075,45 @@ export default function Members() {
         email: emailNorm || undefined,
         phoneNumber: phoneForApi,
         phoneCodeNumber: dial,
-        emergencyPhoneNumber: emergencyNational || undefined,
-        emergencyPhoneCodeNumber: emergencyNational ? dial : undefined,
+        emergencyPhoneNumber: hasEmergencyPhone ? emergencyNational : undefined,
+        emergencyPhoneCodeNumber: hasEmergencyPhone ? dial : undefined,
         fullAddress: addressTrim || undefined,
         planID: DEFAULT_MEMBER_PLAN_ID,
         enrollmentDate: newMemberForm.enrollmentDate,
         renewalDate: newMemberForm.renewalDate,
         idDocumentDataUrl: newMemberForm.idDocumentDataUrl,
+        isDirectDebit: newMemberForm.directDebit,
+        regularPrice: newMemberForm.directDebit ? 0 : paymentAmount,
+        directDebitPrice: newMemberForm.directDebit ? paymentAmount : 0,
       });
 
       if (!apiResult.ok) {
-        toast.error("No se pudo registrar el miembro", {
-          description: apiResult.message,
+        const statusSuffix =
+          apiResult.statusCode != null && apiResult.statusCode > 0
+            ? ` (HTTP ${apiResult.statusCode})`
+            : "";
+        toast.error(`No se pudo registrar el miembro${statusSuffix}`, {
+          description: apiResult.message || "Sin detalle del servidor.",
+          duration: 12_000,
         });
         return;
       }
 
       let row = apiResult.member;
-      const emergencyDisplay = emergencyNational
+      const emergencyDisplay = hasEmergencyPhone
         ? `+${dial} ${emergencyNational}`.replace(/\s+$/, "")
         : undefined;
       row = {
         ...row,
         phone: phoneDisplay,
+        dateAdded: row.dateAdded || new Date().toISOString(),
         ...(emergencyDisplay ? { emergencyPhone: emergencyDisplay } : {}),
         ...(newMemberForm.idDocumentDataUrl
           ? { idDocumentDataUrl: newMemberForm.idDocumentDataUrl }
           : {}),
+        ...(newMemberForm.directDebit
+          ? { isDirectDebit: true, directDebitPrice: paymentAmount, regularPrice: 0 }
+          : { isDirectDebit: false, regularPrice: paymentAmount, directDebitPrice: 0 }),
       };
 
       if (newMemberForm.enrollFaceId) {
@@ -1114,6 +1170,14 @@ export default function Members() {
             : newMemberForm.enrollFaceId && row.faceIdEnrolled
               ? `${fullName} · ${row.id} · Rostro registrado`
               : `${fullName} · ${row.id}`,
+      });
+    } catch (error) {
+      toast.error("No se pudo registrar el miembro", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Error inesperado al guardar el miembro.",
+        duration: 12_000,
       });
     } finally {
       setSavingNewMember(false);
@@ -1447,6 +1511,17 @@ export default function Members() {
                             <span className="text-[#e5e2e1] font-bold">{memberPlanLabel(member.tier)}</span>
                           </p>
                         )}
+                        {member.isDirectDebit ? (
+                          <p className="text-[#b8d4ff] text-[11px] mb-4 font-semibold">
+                            Pago domiciliado
+                            {member.directDebitPrice != null && member.directDebitPrice > 0
+                              ? ` · $${member.directDebitPrice.toLocaleString("es-MX", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}`
+                              : ""}
+                          </p>
+                        ) : null}
                         <div className="grid grid-cols-2 gap-3 pt-4 border-t border-[rgba(93,63,60,0.1)]">
                           <div>
                             <p className="text-[#393939] text-[9px] font-bold mb-1">INICIO</p>
@@ -1957,7 +2032,7 @@ export default function Members() {
                   Alta en directorio
                 </h3>
                 <p className="text-[#808080] text-[11px] mt-2 leading-relaxed break-words">
-                  Comunicación principal por <span className="text-[#e5e2e1] font-semibold">WhatsApp</span> (teléfono obligatorio).
+                  El teléfono de contacto del miembro es obligatorio. El de emergencia es opcional.
                 </p>
               </div>
               <button
@@ -2007,7 +2082,7 @@ export default function Members() {
                   <div className="min-w-0 xl:col-span-2">
                     <label className="flex items-center gap-2 text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
                       <MessageCircle size={12} className="text-[#25d366] shrink-0" />
-                      WhatsApp / teléfono
+                      WhatsApp / teléfono del miembro
                     </label>
                     <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-stretch">
                       <div ref={phonePrefixRef} className="relative w-full shrink-0 sm:w-[5.25rem]">
@@ -2061,8 +2136,8 @@ export default function Members() {
                           setNewMemberForm({ ...newMemberForm, phoneNational: e.target.value })
                         }
                         placeholder="55 1234 5678"
-                        className="min-w-0 flex-1 box-border border border-[rgba(93,63,60,0.2)] bg-[#0e0e0e] px-4 py-3 font-['Space_Grotesk',sans-serif] text-[#e5e2e1] focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px]"
                         required
+                        className="min-w-0 flex-1 box-border border border-[rgba(93,63,60,0.2)] bg-[#0e0e0e] px-4 py-3 font-['Space_Grotesk',sans-serif] text-[#e5e2e1] focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px]"
                       />
                     </div>
                   </div>
@@ -2070,7 +2145,9 @@ export default function Members() {
                     <label className="flex items-center gap-2 text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
                       <Phone size={12} className="text-[#e31e24] shrink-0" />
                       Teléfono de emergencia{" "}
-                      <span className="font-normal normal-case text-[#5a5a5a]">(opcional)</span>
+                      <span className="normal-case tracking-normal font-medium text-[#5a5a5a]">
+                        (opcional)
+                      </span>
                     </label>
                     <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-stretch">
                       <div className="w-full shrink-0 sm:w-[5.25rem]">
@@ -2128,7 +2205,8 @@ export default function Members() {
               <div className="min-w-0 overflow-hidden rounded-sm bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4">
                 <p className="flex items-center gap-2 text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase">
                   <IdCard size={14} className="text-[#e31e24]" />
-                  Identificación oficial
+                  Identificación oficial{" "}
+                  <span className="font-normal normal-case text-[#5a5a5a]">(opcional)</span>
                 </p>
                 <div
                   className={
@@ -2139,8 +2217,8 @@ export default function Members() {
                 >
                   <div className="min-w-0 space-y-3">
                     <p className="text-[#5a5a5a] text-[9px] leading-relaxed">
-                      Importa archivo o abre la cámara (vista previa en vivo y captura). Requiere permiso del navegador;
-                      en escritorio muchos equipos solo abren cámara vía este visor, no con el botón del sistema.
+                      Puedes adjuntarla después. Importa archivo o abre la cámara (vista previa en vivo y captura).
+                      Requiere permiso del navegador; en escritorio muchos equipos solo abren cámara vía este visor.
                     </p>
                     <input
                       ref={idFileInputRef}
@@ -2313,11 +2391,41 @@ export default function Members() {
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={newMemberForm.payNow}
-                    onChange={(e) =>
-                      setNewMemberForm((f) => ({ ...f, payNow: e.target.checked }))
-                    }
+                    checked={newMemberForm.directDebit}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setNewMemberForm((f) => ({
+                        ...f,
+                        directDebit: checked,
+                        ...(checked ? { payNow: false } : {}),
+                      }));
+                    }}
                     className="mt-1 w-4 h-4 accent-[#e31e24] rounded border-[rgba(93,63,60,0.4)]"
+                  />
+                  <div>
+                    <span className="text-[#e5e2e1] text-[12px] font-bold">
+                      Pago domiciliado
+                    </span>
+                    <p className="text-[#808080] text-[10px] mt-1 leading-relaxed">
+                      Cargo recurrente automático al banco o tarjeta del miembro. Usa el
+                      costo de suscripción indicado arriba.
+                    </p>
+                  </div>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newMemberForm.payNow}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setNewMemberForm((f) => ({
+                        ...f,
+                        payNow: checked,
+                        ...(checked ? { directDebit: false } : {}),
+                      }));
+                    }}
+                    disabled={newMemberForm.directDebit}
+                    className="mt-1 w-4 h-4 accent-[#e31e24] rounded border-[rgba(93,63,60,0.4)] disabled:opacity-50"
                   />
                   <div>
                     <span className="text-[#e5e2e1] text-[12px] font-bold">

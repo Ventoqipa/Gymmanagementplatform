@@ -104,6 +104,10 @@ export function normalizeCatalogClient(rawInput: unknown): CatalogClient {
     DocExtensionName: readString(raw, "DocExtensionName", "docExtensionName"),
     DocBase64: readString(raw, "DocBase64", "docBase64"),
 
+    isDirectDebit: readBool(raw, "IsDirectDebit", "isDirectDebit"),
+    regularPrice: readNumber(raw, "RegularPrice", "regularPrice"),
+    directDebitPrice: readNumber(raw, "DirectDebitPrice", "directDebitPrice"),
+
     memberID: readString(raw, "MemberID", "memberID"),
     faceID: readString(raw, "FaceID", "faceID"),
   };

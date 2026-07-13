@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+import { getClientIpAddress } from "../core/auth/getClientIpAddress";
 import { useAuth } from "../context/AuthContext";
 import logoImg from "../../imports/image-2.png";
 import { Eye, EyeOff, Lock, User } from "lucide-react";
@@ -24,6 +25,10 @@ export default function Login() {
   const [rememberMe, setRememberMe] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    void getClientIpAddress();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,7 +75,6 @@ export default function Login() {
 
         <div className="bg-[#131313] border border-[rgba(93,63,60,0.1)] p-4 md:p-8">
           <div className="mb-6">
-            
             <h2 className="text-[#e5e2e1] text-[24px] font-black tracking-[-1px] uppercase">
               Iniciar sesión
             </h2>

@@ -21,8 +21,13 @@ export function parseCatalogErrorBody(httpStatus: number, body: unknown): string
   if (isCatalogEnvelope(body)) {
     const userMsg = body.messageUser?.trim();
     const techMsg = body.messageTechnical?.trim();
-    if (userMsg) return userMsg;
-    if (techMsg) return techMsg;
+    const envelopeMsg =
+      typeof body.message === "string" ? body.message.trim() : "";
+    const parts = [userMsg, techMsg, envelopeMsg].filter(
+      (part, index, all): part is string =>
+        Boolean(part) && all.indexOf(part) === index,
+    );
+    if (parts.length > 0) return parts.join(" — ");
     if (!body.isResponseSuccessful) return "No se pudo completar la operación.";
   }
 

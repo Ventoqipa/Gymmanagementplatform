@@ -50,6 +50,7 @@ export const DEFAULT_LABELS: PosLabels = {
     `¿Eliminar "${name}"? Se quitará de la lista y del carrito si está agregado.`,
   ticketBrand: "Elite Gym 24/7",
   ticketClient: "Cliente",
+  ticketPayer: "Atendió",
   ticketClose: "Cerrar",
   ticketPayment: "Pago",
   ticketFooter: "Montos en pesos mexicanos (MXN).",

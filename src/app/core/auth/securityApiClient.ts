@@ -1,10 +1,7 @@
 import { getSignInUrl } from "../../config/security";
+import { normalizeSignInSession } from "./normalizeSignInSession";
 import { parseNetworkError, parseSignInErrorBody } from "./parseSignInError";
-import type {
-  SignInRequestBody,
-  SignInSuccessData,
-  TanosiApiResponse,
-} from "./types";
+import type { SignInRequestBody, SignInSuccessData, TanosiApiResponse } from "./types";
 
 export class SecurityApiError extends Error {
   readonly statusCode: number;
@@ -71,10 +68,16 @@ export async function postSignIn(
         envelope.statusCode,
       );
     }
-    const data = envelope.data as SignInSuccessData;
+    const data = normalizeSignInSession(envelope.data);
     if (!data.token?.trim()) {
       throw new SecurityApiError(
         "Respuesta de inicio de sesión sin token.",
+        envelope.statusCode,
+      );
+    }
+    if (!data.authenticatedUser?.hermesID?.trim()) {
+      throw new SecurityApiError(
+        "Respuesta de inicio de sesión sin usuario.",
         envelope.statusCode,
       );
     }

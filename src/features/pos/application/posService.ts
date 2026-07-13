@@ -36,6 +36,7 @@ export class PosService {
     paymentMethod: string,
     member?: LinkedCustomer,
     ivaRegimen?: CheckoutInput["ivaRegimen"],
+    payer?: LinkedCustomer,
   ): Promise<{
     sale: PosSale;
     receipt: PosTicketReceipt;
@@ -45,6 +46,7 @@ export class PosService {
       lines,
       paymentMethod,
       member,
+      payer,
       ivaRegimen: ivaRegimen ?? "sin_iva",
     };
     return this.repository.checkout(input);

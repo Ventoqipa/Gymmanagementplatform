@@ -38,6 +38,8 @@ export type PosLabels = {
   deleteConfirm: (name: string) => string;
   ticketBrand: string;
   ticketClient: string;
+  /** Usuario de caja que registró la venta (payer). */
+  ticketPayer: string;
   ticketClose: string;
   ticketPayment: string;
   ticketFooter: string;
@@ -81,6 +83,8 @@ export type PosConfig = {
   confirmDelete?: (message: string) => boolean;
   /** Directorio de miembros para asociar ventas en tienda. */
   loadCustomers?: () => Promise<import("../domain/types").LinkedCustomer[]>;
+  /** Usuario con sesión iniciada que registra la venta (cajero). */
+  getSessionPayer?: () => import("../domain/types").LinkedCustomer | null;
 };
 
 export type PosConfigInput = Partial<

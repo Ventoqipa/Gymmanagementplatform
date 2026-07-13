@@ -5,6 +5,7 @@ const SESSION_KEY = "auth_session";
 const COMPANY_ID_KEY = "auth_company_id";
 const BRANCH_ID_KEY = "auth_branch_id";
 const USER_ID_KEY = "auth_user_id";
+const USER_NAME_KEY = "auth_user_name";
 const REMEMBER_KEY = "auth_remember_me";
 const AUTH_FLAG_KEY = "isAuthenticated";
 
@@ -54,6 +55,7 @@ export function persistSession(
   const companyId = session.authenticatedUser?.companyID;
   const branchId = session.authenticatedUser?.branchID;
   const userId = session.authenticatedUser?.hermesID?.trim();
+  const userName = session.authenticatedUser?.userFullName?.trim();
 
   storage.setItem(TOKEN_KEY, session.token);
   storage.setItem(SESSION_KEY, JSON.stringify(session));
@@ -61,6 +63,9 @@ export function persistSession(
 
   if (userId) {
     storage.setItem(USER_ID_KEY, userId);
+  }
+  if (userName) {
+    storage.setItem(USER_NAME_KEY, userName);
   }
 
   if (companyId != null) {
@@ -84,6 +89,7 @@ export function clearSession(): void {
     storage.removeItem(COMPANY_ID_KEY);
     storage.removeItem(BRANCH_ID_KEY);
     storage.removeItem(USER_ID_KEY);
+    storage.removeItem(USER_NAME_KEY);
     storage.removeItem(AUTH_FLAG_KEY);
   }
   localStorage.removeItem(REMEMBER_KEY);
@@ -136,4 +142,21 @@ export function getSessionUserId(): string {
     if (fromKey) return fromKey;
   }
   return loadStoredSession()?.authenticatedUser?.hermesID?.trim() ?? "";
+}
+
+/** Nombre completo del usuario con sesión iniciada (userFullName del SignIn). */
+export function getSessionUserName(): string {
+  for (const storage of allStorages()) {
+    const fromKey = storage.getItem(USER_NAME_KEY)?.trim();
+    if (fromKey) return fromKey;
+  }
+  return loadStoredSession()?.authenticatedUser?.userFullName?.trim() ?? "";
+}
+
+/** Usuario de caja que registra la venta (payer en POS). */
+export function getSessionPayer(): { id: string; name: string } | null {
+  const id = getSessionUserId();
+  const name = getSessionUserName();
+  if (!id && !name) return null;
+  return { id, name: name || id };
 }

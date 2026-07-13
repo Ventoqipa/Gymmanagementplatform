@@ -5,6 +5,14 @@ import { clientToMember } from "../mappers/clientMemberMapper";
 import type { AddClientInput } from "../types";
 import type { Member } from "../../../lib/membersStore";
 
+function phoneDigits(value?: string | null): string {
+  return (value ?? "").replace(/\D/g, "");
+}
+
+function isValidMemberPhone(value?: string | null): boolean {
+  return phoneDigits(value).length >= 10;
+}
+
 export type AddClientResult =
   | { ok: true; member: Member }
   | { ok: false; message: string; statusCode?: number };
@@ -25,8 +33,12 @@ export async function addClientUseCase(
   if (!input.firstName.trim() || !input.lastName.trim()) {
     return { ok: false, message: "Nombre y apellidos son obligatorios." };
   }
-  if (!input.phoneNumber.trim()) {
-    return { ok: false, message: "El teléfono es obligatorio." };
+
+  if (!isValidMemberPhone(input.phoneNumber)) {
+    return {
+      ok: false,
+      message: "El teléfono de contacto del miembro es obligatorio.",
+    };
   }
   if (!input.planID || input.planID <= 0) {
     return { ok: false, message: "Seleccione un plan de membresía." };

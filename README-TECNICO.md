@@ -38,7 +38,9 @@ Inicio de sesión contra el API Tanosi (`POST /api/ge/Security/Access/SignIn`):
 
 - **Caso de uso:** `src/app/core/auth/signInUseCase.ts` (validación de usuario/contraseña, IP, `appID`, `typeAccess`).
 - **Cliente HTTP:** `src/app/core/auth/securityApiClient.ts` (errores Tanosi 409 y validación ASP.NET 400).
-- **Persistencia:** token, sesión, `companyID` y `branchID` en `localStorage` (Recuérdame) o `sessionStorage` vía `authStorage.ts`.
+- **Persistencia:** token, sesión completa (`authenticatedUser`), `companyID`, `branchID`, `hermesID` y `userFullName` en `localStorage` (Recuérdame) o `sessionStorage` vía `authStorage.ts`.
+- **Normalización:** `normalizeSignInSession.ts` unifica PascalCase/camelCase de la respuesta SignIn.
+- **Cajero POS:** `getSessionPayer()` expone `{ id: hermesID, name: userFullName }` para registrar quién atendió cada venta (`payerId` / `payerName` en POS API).
 
 Variables opcionales (ver `.env.example`): `VITE_SECURITY_API_URL`, `VITE_APP_ID`, `VITE_TYPE_ACCESS`.
 

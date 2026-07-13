@@ -9,7 +9,7 @@ export type {
   PlanWithValidity,
 } from "./types";
 
-export { listClientsUseCase } from "./useCases/listClientsUseCase";
+export { listClientsUseCase, sortMembersByDateAddedDesc } from "./useCases/listClientsUseCase";
 export { getClientUseCase } from "./useCases/getClientUseCase";
 export { addClientUseCase } from "./useCases/addClientUseCase";
 export { updateClientUseCase } from "./useCases/updateClientUseCase";

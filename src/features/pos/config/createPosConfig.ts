@@ -79,6 +79,7 @@ export function createPosConfig(overrides: PosConfigInput = {}): PosConfig {
       overrides.confirmDelete ??
       ((message) => window.confirm(message)),
     loadCustomers: overrides.loadCustomers,
+    getSessionPayer: overrides.getSessionPayer,
   };
 }
 

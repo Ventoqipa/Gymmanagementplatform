@@ -1,4 +1,4 @@
-import type { PosReportBucket, PosSale } from "@/features/pos";
+import type { PayerSalesSummary, PosReportBucket, PosSale } from "@/features/pos";
 import { downloadExcelReport, type ExcelSection } from "./exportExcel";
 import { MEMBERSHIP_CONCEPT, PAYMENT_METHOD } from "./labels";
 
@@ -49,8 +49,10 @@ export function exportProductSalesReport(
         "IVA",
         "Método de pago",
         "Detalle",
-        "Miembro",
-        "ID miembro",
+        "Cliente",
+        "ID cliente",
+        "Atendió",
+        "ID cajero",
       ],
       rows: sales.map((sale) => [
         sale.id,
@@ -62,6 +64,8 @@ export function exportProductSalesReport(
         sale.linesSummary,
         sale.memberName ?? "",
         sale.memberId ?? "",
+        sale.payerName ?? "",
+        sale.payerId ?? "",
       ]),
     },
   ]);
@@ -87,8 +91,10 @@ export function exportSubscriptionSalesReport(
         "Concepto",
         "Periodo",
         "Detalle",
-        "Miembro",
-        "ID miembro",
+        "Cliente",
+        "ID cliente",
+        "Atendió",
+        "ID cajero",
       ],
       rows: sales.map((sale) => [
         sale.id,
@@ -104,6 +110,8 @@ export function exportSubscriptionSalesReport(
         sale.linesSummary,
         sale.memberName ?? "",
         sale.memberId ?? "",
+        sale.payerName ?? "",
+        sale.payerId ?? "",
       ]),
     },
   ]);
@@ -138,5 +146,50 @@ export function exportPeriodSummaryReport(
     kind === "products" ? "resumen_productos" : "resumen_suscripciones";
   downloadExcelReport(buildFilename(prefix, from, to), [
     summarySection(from, to, bucket),
+  ]);
+}
+
+export function exportCashierReport(
+  rows: PayerSalesSummary[],
+  from: string,
+  to: string,
+): void {
+  const totalCount = rows.reduce((acc, row) => acc + row.totalCount, 0);
+  const totalAmount = rows.reduce((acc, row) => acc + row.totalAmount, 0);
+
+  downloadExcelReport(buildFilename("reporte_vendedor", from, to), [
+    {
+      title: "Resumen por cajero",
+      headers: ["Concepto", "Valor"],
+      rows: [
+        ["Periodo", `${from} — ${to}`],
+        ["Vendedores", rows.length],
+        ["Transacciones", totalCount],
+        ["Total cobrado", totalAmount.toFixed(2)],
+      ],
+    },
+    {
+      title: "Detalle por cajero",
+      headers: [
+        "Cajero",
+        "ID cajero",
+        "Ventas productos",
+        "Monto productos",
+        "Suscripciones",
+        "Monto suscripciones",
+        "Total transacciones",
+        "Total cobrado",
+      ],
+      rows: rows.map((row) => [
+        row.payerName,
+        row.payerId,
+        row.productCount,
+        row.productTotal.toFixed(2),
+        row.subscriptionCount,
+        row.subscriptionTotal.toFixed(2),
+        row.totalCount,
+        row.totalAmount.toFixed(2),
+      ]),
+    },
   ]);
 }
