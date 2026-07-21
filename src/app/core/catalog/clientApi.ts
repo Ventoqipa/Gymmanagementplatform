@@ -92,8 +92,6 @@ export function buildClientPayload(
 
   const renewalIso = toIsoDateTime(input.renewalDate);
   const isDirectDebit = Boolean(input.isDirectDebit);
-  const regularPrice = Math.max(0, input.regularPrice ?? 0);
-  const directDebitPrice = Math.max(0, input.directDebitPrice ?? 0);
 
   return {
     clientID: clientId,
@@ -130,9 +128,11 @@ export function buildClientPayload(
     DocBase64: docBase64,
 
     isDirectDebit,
-    // Reglas API: RegularPrice si IsDirectDebit=false; DirectDebitPrice si true.
-    regularPrice: isDirectDebit ? 0 : regularPrice,
-    directDebitPrice: isDirectDebit ? directDebitPrice : 0,
+    priceRegular: Math.max(0, input.priceRegular ?? 0),
+    priceDirectDebit: Math.max(0, input.priceDirectDebit ?? 0),
+    isPromotionalSubscription: Boolean(input.isPromotionalSubscription),
+    priceSubscription: Math.max(0, input.priceSubscription ?? 200),
+    priceBranchFrequencyID: Math.max(1, input.priceBranchFrequencyID ?? 1),
   };
 }
 

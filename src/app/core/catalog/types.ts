@@ -28,9 +28,18 @@ export type CatalogClientWritePayload = {
   DocBase64: string | null;
   isDirectDebit?: boolean | null;
   /** Precio regular cuando isDirectDebit es false. */
-  regularPrice?: number;
+  priceRegular?: number;
   /** Precio domiciliado cuando isDirectDebit es true. */
-  directDebitPrice?: number;
+  priceDirectDebit?: number;
+  /**
+   * true = cuota de suscripción desactivada (promoción);
+   * false = se cobra la suscripción.
+   */
+  isPromotionalSubscription?: boolean | null;
+  /** Cuota de entrada / suscripción (alta). */
+  priceSubscription?: number;
+  /** Frecuencia de precio en sucursal. */
+  priceBranchFrequencyID?: number;
 };
 
 /** Respuesta GET / listado (acepta nombres legacy y actuales). */
@@ -89,10 +98,19 @@ export type AddClientInput = {
   renewalDate: string;
   idDocumentDataUrl?: string | null;
   isDirectDebit?: boolean;
-  /** Precio regular (IsDirectDebit = false). */
-  regularPrice?: number;
-  /** Precio domiciliado (IsDirectDebit = true). */
-  directDebitPrice?: number;
+  /** Precio regular (isDirectDebit = false). */
+  priceRegular?: number;
+  /** Precio domiciliado (isDirectDebit = true). */
+  priceDirectDebit?: number;
+  /**
+   * true = cuota de suscripción desactivada (promoción);
+   * false = se cobra la suscripción.
+   */
+  isPromotionalSubscription?: boolean;
+  /** Cuota de entrada / suscripción. Por defecto 200. */
+  priceSubscription?: number;
+  /** Frecuencia de precio en sucursal. Por defecto 1. */
+  priceBranchFrequencyID?: number;
 };
 
 export type UpdateClientInput = AddClientInput & {
@@ -140,4 +158,44 @@ export type CatalogPlanListData = {
 /** Plan con vigencia (meses) — metadata local complementaria al API */
 export type PlanWithValidity = CatalogPlan & {
   validityMonths: number;
+};
+
+/** FrequencyName del catálogo de precios por sucursal. */
+export type CatalogPriceFrequencyName =
+  | "Day"
+  | "Week"
+  | "Month"
+  | "Quarter"
+  | "Semester"
+  | "Year"
+  | string;
+
+/** Ítem de GET Prices/Plan/ViewAllByBranch/{branchId}. */
+export type CatalogBranchPrice = {
+  priceBranchFrequencyID: number;
+  branchName: string;
+  frequencyName: CatalogPriceFrequencyName;
+  /** Pago directo (total del periodo). */
+  priceRegular: number;
+  /** Pago domiciliado. */
+  priceDirectDebit: number;
+};
+
+export type CatalogBranchPricesData = {
+  price?: CatalogBranchPriceRaw[];
+  Price?: CatalogBranchPriceRaw[];
+};
+
+/** Respuesta cruda (Pascal / camel). */
+export type CatalogBranchPriceRaw = {
+  PriceBranchFrequencyID?: number;
+  priceBranchFrequencyID?: number;
+  BranchName?: string;
+  branchName?: string;
+  FrequencyName?: string;
+  frequencyName?: string;
+  PriceRegular?: number;
+  priceRegular?: number;
+  PriceDirectDebit?: number;
+  priceDirectDebit?: number;
 };

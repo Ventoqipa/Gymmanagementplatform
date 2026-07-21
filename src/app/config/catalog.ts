@@ -22,6 +22,8 @@ export const catalogConfig = {
     planAdd: "/api/eg/Catalogs/Plan/Add",
     planUpdate: "/api/eg/Catalogs/Plan/Update",
     planDelete: (planId: number) => `/api/eg/Catalogs/Plan/Delete/${planId}`,
+    pricesByBranch: (branchId: number) =>
+      `/api/eg/Catalogs/Prices/Plan/ViewAllByBranch/${branchId}`,
   },
   defaults: {
     countryId: Number(import.meta.env.VITE_CATALOG_DEFAULT_COUNTRY_ID ?? "117") || 117,

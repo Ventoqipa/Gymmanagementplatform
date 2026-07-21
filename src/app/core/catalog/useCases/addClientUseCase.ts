@@ -40,6 +40,12 @@ export async function addClientUseCase(
       message: "El teléfono de contacto del miembro es obligatorio.",
     };
   }
+  if (!isValidMemberPhone(input.emergencyPhoneNumber)) {
+    return {
+      ok: false,
+      message: "El teléfono de emergencia es obligatorio.",
+    };
+  }
   if (!input.planID || input.planID <= 0) {
     return { ok: false, message: "Seleccione un plan de membresía." };
   }

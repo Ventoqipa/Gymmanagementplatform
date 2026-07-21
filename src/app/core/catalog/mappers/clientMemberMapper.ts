@@ -114,12 +114,12 @@ export function clientToMember(
     faceIdTemplateId: faceId || undefined,
     isDirectDebit: client.isDirectDebit === true ? true : undefined,
     regularPrice:
-      client.isDirectDebit !== true && client.regularPrice != null
-        ? Number(client.regularPrice)
+      client.isDirectDebit !== true && client.priceRegular != null
+        ? Number(client.priceRegular)
         : undefined,
     directDebitPrice:
-      client.isDirectDebit === true && client.directDebitPrice != null
-        ? Number(client.directDebitPrice)
+      client.isDirectDebit === true && client.priceDirectDebit != null
+        ? Number(client.priceDirectDebit)
         : undefined,
     dateAdded: client.dateAdded?.trim() || null,
   };

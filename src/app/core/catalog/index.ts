@@ -7,6 +7,8 @@ export type {
   AddPlanInput,
   UpdatePlanInput,
   PlanWithValidity,
+  CatalogBranchPrice,
+  CatalogPriceFrequencyName,
 } from "./types";
 
 export { listClientsUseCase, sortMembersByDateAddedDesc } from "./useCases/listClientsUseCase";
@@ -20,6 +22,7 @@ export {
   updatePlanUseCase,
   deletePlanUseCase,
 } from "./useCases/planUseCases";
+export { listBranchPricesUseCase } from "./useCases/listBranchPricesUseCase";
 
 export {
   clientToMember,
@@ -27,6 +30,13 @@ export {
   clientIdFromMemberId,
   memberIdFromClient,
 } from "./mappers/clientMemberMapper";
+
+export {
+  buildDirectPayPeriodOptions,
+  buildDirectDebitPeriodOptions,
+  findPeriodOption,
+  type BranchPricePeriodOption,
+} from "./mappers/branchPriceMapper";
 
 export { buildClientPayload } from "./clientApi";
 export { buildPhotoClientIdFileName, dataUrlToBase64 } from "./utils/clientPhoto";

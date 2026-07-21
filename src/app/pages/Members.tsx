@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import { toast } from "sonner";
 import imgMemberProfile from "../../imports/PerfilDeMiembroGestion/3b634f4a9044fcdaee9556d934e90fbcffd448af.png";
 import {
   Search,
@@ -20,11 +21,14 @@ import {
   MessageCircle,
   Phone,
   Pencil,
+  Check,
+  CheckCircle2,
 } from "lucide-react";
-import { addClientUseCase, listClientsUseCase, updateClientUseCase, clientIdFromMemberId, sortMembersByDateAddedDesc } from "../core/catalog";
+import { addClientUseCase, listClientsUseCase, updateClientUseCase, clientIdFromMemberId, sortMembersByDateAddedDesc, listBranchPricesUseCase, buildDirectPayPeriodOptions, buildDirectDebitPeriodOptions, findPeriodOption, type BranchPricePeriodOption, type CatalogBranchPrice } from "../core/catalog";
 import { getSessionPayer } from "../core/auth/authStorage";
 import {
   getSubscriptionPrice,
+  getDirectDebitMonthlyPrice,
   type SubscriptionPeriodKey,
 } from "../lib/plansStore";
 import { useAuth } from "../context/AuthContext";
@@ -303,11 +307,9 @@ function addMonthsIso(dateStr: string, months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Fin del periodo permitido: alta + 1 año calendario (máx. renovación). */
+/** Fin del periodo permitido: alta + 18 meses. */
 function renewalWindowMaxIso(enrollmentIso: string): string {
-  const d = new Date(enrollmentIso + "T12:00:00");
-  d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString().slice(0, 10);
+  return addMonthsIso(enrollmentIso, 18);
 }
 
 function clampRenewalDate(enrollmentIso: string, renewalIso: string): string {
@@ -318,7 +320,7 @@ function clampRenewalDate(enrollmentIso: string, renewalIso: string): string {
   return renewalIso;
 }
 
-/** Periodos de membresía hasta renovación (tope: 1 año desde la alta). */
+/** Periodos de membresía hasta renovación. */
 function renewalAfterPeriod(
   enrollmentIso: string,
   period: { days?: number; weeks?: number; months?: number },
@@ -334,32 +336,98 @@ function renewalAfterMonths(enrollmentIso: string, months: number): string {
   return renewalAfterPeriod(enrollmentIso, { months });
 }
 
+function formatMxnAmount(value: number): string {
+  return value.toLocaleString("es-MX", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 const DEFAULT_MEMBER_PLAN_ID = 1;
 
-const SUBSCRIPTION_PERIOD_OPTIONS = [
-  { key: "1d" as const, label: "1 día", period: { days: 1 } },
-  { key: "1w" as const, label: "1 semana", period: { weeks: 1 } },
-  { key: "1m" as const, label: "1 mes", period: { months: 1 } },
-  { key: "3m" as const, label: "3 meses", period: { months: 3 } },
-  { key: "6m" as const, label: "6 meses", period: { months: 6 } },
-  { key: "12m" as const, label: "12 meses", period: { months: 12 } },
+/** Fallback local si el catálogo de precios no responde. */
+const FALLBACK_DIRECT_PAY_OPTIONS: BranchPricePeriodOption[] = [
+  { key: "1d", label: "1 día", frequencyName: "Day", priceBranchFrequencyID: 1, priceRegular: getSubscriptionPrice("1d"), priceDirectDebit: 0, period: { days: 1 } },
+  { key: "1w", label: "1 semana", frequencyName: "Week", priceBranchFrequencyID: 2, priceRegular: getSubscriptionPrice("1w"), priceDirectDebit: 0, period: { weeks: 1 } },
+  { key: "1m", label: "1 mes", frequencyName: "Month", priceBranchFrequencyID: 3, priceRegular: getSubscriptionPrice("1m"), priceDirectDebit: 0, period: { months: 1 }, months: 1 },
+  { key: "3m", label: "3 meses", frequencyName: "Quarter", priceBranchFrequencyID: 4, priceRegular: getSubscriptionPrice("3m"), priceDirectDebit: 0, period: { months: 3 }, months: 3 },
+  { key: "6m", label: "6 meses", frequencyName: "Semester", priceBranchFrequencyID: 5, priceRegular: getSubscriptionPrice("6m"), priceDirectDebit: getDirectDebitMonthlyPrice("6m"), period: { months: 6 }, months: 6 },
+  { key: "12m", label: "12 meses", frequencyName: "Year", priceBranchFrequencyID: 6, priceRegular: getSubscriptionPrice("12m"), priceDirectDebit: getDirectDebitMonthlyPrice("12m"), period: { months: 12 }, months: 12 },
+];
+
+const FALLBACK_DIRECT_DEBIT_OPTIONS = FALLBACK_DIRECT_PAY_OPTIONS.filter(
+  (o) => o.key === "6m" || o.key === "12m",
+);
+
+const DEFAULT_SUBSCRIPTION_FEE = "200.00";
+
+function applyDirectDebitPeriod(
+  enrollmentIso: string,
+  option: BranchPricePeriodOption,
+): {
+  renewalDate: string;
+  monthlyPrice: number;
+  months: number;
+  projectedTotal: number;
+} {
+  const months = option.months ?? (option.key === "12m" ? 12 : 6);
+  const monthlyPrice = option.priceDirectDebit;
+  return {
+    renewalDate: renewalAfterPeriod(enrollmentIso, { months }),
+    monthlyPrice,
+    months,
+    projectedTotal: monthlyPrice * months,
+  };
+}
+
+type AddMemberWizardStep = 1 | 2 | 3 | 4;
+
+type AddMemberStep1Field =
+  | "firstName"
+  | "lastName"
+  | "phoneNational"
+  | "emergencyPhoneNational"
+  | "email";
+
+type AddMemberStep1Errors = Partial<Record<AddMemberStep1Field, string>>;
+
+const STEP1_FIELD_LABELS: Record<AddMemberStep1Field, string> = {
+  firstName: "Nombres",
+  lastName: "Apellidos",
+  phoneNational: "Teléfono de contacto",
+  emergencyPhoneNational: "Teléfono de emergencia",
+  email: "Correo electrónico",
+};
+
+const fieldErrorClass =
+  "border-[#e31e24]/70 focus:border-[#e31e24] ring-1 ring-[#e31e24]/35";
+const fieldOkClass =
+  "border-[rgba(93,63,60,0.2)] focus:border-[#e31e24]";
+
+
+const ADD_MEMBER_WIZARD_STEPS: {
+  step: AddMemberWizardStep;
+  label: string;
+  optional?: boolean;
+}[] = [
+  { step: 1, label: "Datos" },
+  { step: 2, label: "Membresía" },
+  { step: 3, label: "Face ID", optional: true },
+  { step: 4, label: "Éxito" },
 ];
 
 function applySubscriptionPeriod(
   enrollmentIso: string,
-  periodKey: SubscriptionPeriodKey | null,
-): { renewalDate: string; cost: string } {
-  const key = periodKey ?? "1m";
-  const opt = SUBSCRIPTION_PERIOD_OPTIONS.find((p) => p.key === key);
-  if (!opt) {
-    return {
-      renewalDate: renewalAfterMonths(enrollmentIso, 1),
-      cost: getSubscriptionPrice("1m").toFixed(2),
-    };
-  }
+  option: BranchPricePeriodOption | null | undefined,
+): { renewalDate: string; cost: string; priceBranchFrequencyID: number } {
+  const opt =
+    option ??
+    FALLBACK_DIRECT_PAY_OPTIONS.find((p) => p.key === "1m") ??
+    FALLBACK_DIRECT_PAY_OPTIONS[0];
   return {
     renewalDate: renewalAfterPeriod(enrollmentIso, opt.period),
-    cost: getSubscriptionPrice(key).toFixed(2),
+    cost: opt.priceRegular.toFixed(2),
+    priceBranchFrequencyID: opt.priceBranchFrequencyID,
   };
 }
 
@@ -382,18 +450,15 @@ function renewalBaseDate(member: Pick<Member, "renewalDate">): string {
 
 function extendMembershipPeriod(
   fromIso: string,
-  periodKey: SubscriptionPeriodKey,
+  option: BranchPricePeriodOption,
+  directDebit = false,
 ): { newRenewalDate: string; cost: string } {
-  const opt = SUBSCRIPTION_PERIOD_OPTIONS.find((p) => p.key === periodKey);
-  if (!opt) {
-    return {
-      newRenewalDate: addPeriodToDate(fromIso, { months: 1 }),
-      cost: getSubscriptionPrice("1m").toFixed(2),
-    };
-  }
   return {
-    newRenewalDate: addPeriodToDate(fromIso, opt.period),
-    cost: getSubscriptionPrice(periodKey).toFixed(2),
+    newRenewalDate: addPeriodToDate(fromIso, option.period),
+    // En domiciliado el costo mostrado es la mensualidad.
+    cost: (directDebit ? option.priceDirectDebit : option.priceRegular).toFixed(
+      2,
+    ),
   };
 }
 
@@ -423,8 +488,13 @@ function memberToEditForm(member: Member) {
 
 const emptyNewMemberForm = () => {
   const today = new Date().toISOString().slice(0, 10);
-  const defaultPeriod: SubscriptionPeriodKey = "1m";
-  const { renewalDate, cost } = applySubscriptionPeriod(today, defaultPeriod);
+  const defaultOpt =
+    FALLBACK_DIRECT_PAY_OPTIONS.find((p) => p.key === "1m") ??
+    FALLBACK_DIRECT_PAY_OPTIONS[0];
+  const { renewalDate, cost, priceBranchFrequencyID } = applySubscriptionPeriod(
+    today,
+    defaultOpt,
+  );
   return {
     firstName: "",
     lastName: "",
@@ -433,14 +503,19 @@ const emptyNewMemberForm = () => {
     phoneNational: "",
     emergencyPhoneNational: "",
     planID: DEFAULT_MEMBER_PLAN_ID,
-    selectedPeriodKey: defaultPeriod as SubscriptionPeriodKey | null,
-    subscriptionCost: cost,
-    payNow: true,
+    selectedPeriodKey: defaultOpt.key as SubscriptionPeriodKey | null,
+    priceBranchFrequencyID,
+    /** Cuota de entrada (pago único de suscripción), independiente de la membresía. */
+    subscriptionFee: DEFAULT_SUBSCRIPTION_FEE,
+    /** Cobrar cuota de entrada al alta (opcional; en domiciliado inicia apagada). */
+    chargeSubscriptionFee: true,
+    /** Precio de la membresía según vigencia (priceRegular / priceDirectDebit). */
+    membershipCost: cost,
     directDebit: false,
     paymentMethod: "CARD" as "CASH" | "CARD" | "QR",
     enrollmentDate: today,
     renewalDate,
-    enrollFaceId: true,
+    enrollFaceId: false,
     faceIdTerminal: "TRN-MAIN-01",
     address: "",
     idDocumentDataUrl: null as string | null,
@@ -454,7 +529,97 @@ export default function Members() {
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersFromApi, setMembersFromApi] = useState(false);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [addMemberStep, setAddMemberStep] = useState<AddMemberWizardStep>(1);
+  const [createdMemberSummary, setCreatedMemberSummary] = useState<{
+    id: string;
+    name: string;
+    faceIdEnrolled: boolean;
+    subscriptionPaid: boolean;
+    subscriptionFee: number;
+    membershipAmount: number;
+    directDebit: boolean;
+  } | null>(null);
+  /** Miembro ya creado en catálogo (paso 1). */
+  const [wizardMember, setWizardMember] = useState<Member | null>(null);
+  const [wizardPaymentDone, setWizardPaymentDone] = useState(false);
+  const [wizardSync, setWizardSync] = useState<
+    null | "client" | "payment" | "faceid"
+  >(null);
+  const [branchPrices, setBranchPrices] = useState<CatalogBranchPrice[]>([]);
+  const [branchPricesLoading, setBranchPricesLoading] = useState(false);
   const [newMemberForm, setNewMemberForm] = useState(emptyNewMemberForm());
+  const [step1Errors, setStep1Errors] = useState<AddMemberStep1Errors>({});
+  const [showPurchaseConfirmModal, setShowPurchaseConfirmModal] = useState(false);
+
+  const directPayOptions = useMemo(
+    () =>
+      branchPrices.length > 0
+        ? buildDirectPayPeriodOptions(branchPrices)
+        : FALLBACK_DIRECT_PAY_OPTIONS,
+    [branchPrices],
+  );
+  const directDebitOptions = useMemo(
+    () =>
+      branchPrices.length > 0
+        ? buildDirectDebitPeriodOptions(branchPrices)
+        : FALLBACK_DIRECT_DEBIT_OPTIONS,
+    [branchPrices],
+  );
+
+  const syncFormWithPriceOptions = (
+    prices: CatalogBranchPrice[],
+    form = emptyNewMemberForm(),
+  ) => {
+    const payOpts = buildDirectPayPeriodOptions(prices);
+    const debitOpts = buildDirectDebitPeriodOptions(prices);
+    if (payOpts.length === 0) return form;
+    if (form.directDebit) {
+      const opt =
+        findPeriodOption(debitOpts, form.selectedPeriodKey) ?? debitOpts[0];
+      if (!opt) return form;
+      const applied = applyDirectDebitPeriod(form.enrollmentDate, opt);
+      return {
+        ...form,
+        selectedPeriodKey: opt.key,
+        priceBranchFrequencyID: opt.priceBranchFrequencyID,
+        renewalDate: applied.renewalDate,
+        membershipCost: applied.monthlyPrice.toFixed(2),
+      };
+    }
+    const opt =
+      findPeriodOption(payOpts, form.selectedPeriodKey) ??
+      findPeriodOption(payOpts, "1m") ??
+      payOpts[0];
+    const applied = applySubscriptionPeriod(form.enrollmentDate, opt);
+    return {
+      ...form,
+      selectedPeriodKey: opt.key,
+      priceBranchFrequencyID: applied.priceBranchFrequencyID,
+      renewalDate: applied.renewalDate,
+      membershipCost: applied.cost,
+    };
+  };
+
+  const loadBranchPrices = async (): Promise<CatalogBranchPrice[] | null> => {
+    setBranchPricesLoading(true);
+    try {
+      const result = await listBranchPricesUseCase();
+      if (!result.ok) {
+        toast.warning("Precios locales", {
+          description:
+            result.message ||
+            "No se pudo cargar el catálogo de precios; se usan valores de respaldo.",
+        });
+        setBranchPrices([]);
+        return null;
+      }
+      setBranchPrices(result.prices);
+      setNewMemberForm((prev) => syncFormWithPriceOptions(result.prices, prev));
+      return result.prices;
+    } finally {
+      setBranchPricesLoading(false);
+    }
+  };
   const [searchTerm, setSearchTerm] = useState("");
   const [filterExpiry, setFilterExpiry] = useState<ExpiryFilter>("ALL");
   const [currentPage, setCurrentPage] = useState(1);
@@ -465,10 +630,14 @@ export default function Members() {
   const [paymentForm, setPaymentForm] = useState({
     amount: getSubscriptionPrice("1m").toFixed(2),
     method: "CARD" as "CASH" | "CARD" | "QR",
+    directDebit: false,
     periodKey: "1m" as SubscriptionPeriodKey,
+    priceBranchFrequencyID: 3,
     newRenewalDate: "",
   });
   const [submittingRenewal, setSubmittingRenewal] = useState(false);
+  /** Cobro POS de la renovación ya registrado (reintento solo actualiza vigencia). */
+  const [renewalPaymentDone, setRenewalPaymentDone] = useState(false);
   const [memberEditForm, setMemberEditForm] = useState<ReturnType<typeof memberToEditForm> | null>(null);
   const [savingMemberEdit, setSavingMemberEdit] = useState(false);
   const memberEditFileRef = useRef<HTMLInputElement>(null);
@@ -522,7 +691,6 @@ export default function Members() {
       saveMembers(members);
     }
   }, [members, membersFromApi]);
-  const [savingNewMember, setSavingNewMember] = useState(false);
   const [phonePrefixMenuOpen, setPhonePrefixMenuOpen] = useState(false);
   const phonePrefixRef = useRef<HTMLDivElement>(null);
   const [showIdCameraModal, setShowIdCameraModal] = useState(false);
@@ -737,14 +905,47 @@ export default function Members() {
 
   const openRenewalModal = (member: Member) => {
     const base = renewalBaseDate(member);
-    const periodKey: SubscriptionPeriodKey = "1m";
-    const { newRenewalDate, cost } = extendMembershipPeriod(base, periodKey);
+    const directDebit = member.isDirectDebit === true;
+    const opt = directDebit
+      ? (findPeriodOption(directDebitOptions, "6m") ?? directDebitOptions[0])
+      : (findPeriodOption(directPayOptions, "1m") ?? directPayOptions[0]);
+    const { newRenewalDate, cost } = extendMembershipPeriod(
+      base,
+      opt,
+      directDebit,
+    );
     setPaymentModalMember(member);
+    setRenewalPaymentDone(false);
     setPaymentForm({
       amount: cost,
       method: "CARD",
-      periodKey,
+      directDebit,
+      periodKey: opt.key,
+      priceBranchFrequencyID: opt.priceBranchFrequencyID,
       newRenewalDate,
+    });
+    // Refresca chips y monto con los precios del catálogo de la sucursal.
+    void loadBranchPrices().then((prices) => {
+      if (!prices) return;
+      setPaymentForm((f) => {
+        const opts = f.directDebit
+          ? buildDirectDebitPeriodOptions(prices)
+          : buildDirectPayPeriodOptions(prices);
+        const fresh = findPeriodOption(opts, f.periodKey) ?? opts[0];
+        if (!fresh) return f;
+        const applied = extendMembershipPeriod(
+          renewalBaseDate(member),
+          fresh,
+          f.directDebit,
+        );
+        return {
+          ...f,
+          periodKey: fresh.key,
+          priceBranchFrequencyID: fresh.priceBranchFrequencyID,
+          amount: applied.cost,
+          newRenewalDate: applied.newRenewalDate,
+        };
+      });
     });
   };
 
@@ -803,9 +1004,9 @@ export default function Members() {
         renewalDate: memberEditForm.renewalDate,
         idDocumentDataUrl: memberEditForm.idDocumentDataUrl,
         isDirectDebit: member.isDirectDebit === true,
-        regularPrice:
+        priceRegular:
           member.isDirectDebit === true ? 0 : (member.regularPrice ?? 0),
-        directDebitPrice:
+        priceDirectDebit:
           member.isDirectDebit === true ? (member.directDebitPrice ?? 0) : 0,
       });
       if (!result.ok) {
@@ -836,6 +1037,8 @@ export default function Members() {
     method: "CASH" | "CARD" | "QR";
     concept: SubscriptionConcept;
     periodKey?: string | null;
+    /** Si es false, no guarda respaldo local: relanza el error para poder reintentar. */
+    localFallback?: boolean;
   }): Promise<{ receipt: PosTicketReceipt; synced: boolean }> => {
     const payer = getSessionPayer();
     const checkoutInput = {
@@ -852,7 +1055,8 @@ export default function Members() {
       const { receipt } =
         await getGymPosService().checkoutSubscription(checkoutInput);
       return { receipt, synced: true };
-    } catch {
+    } catch (error) {
+      if (opts.localFallback === false) throw error;
       addMembershipPayment({
         memberId: opts.memberId,
         amount: opts.amount,
@@ -879,6 +1083,12 @@ export default function Members() {
     });
   };
 
+  /**
+   * Renovación en dos etapas reintenables (mismo comportamiento que el alta):
+   * 1) cobro POS (sin respaldo local; si falla, se reintenta solo el cobro),
+   * 2) actualización de vigencia/precios en catálogo (si falla, el reintento
+   *    salta el cobro y solo repite la actualización).
+   */
   const submitRenewal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!paymentModalMember || submittingRenewal) return;
@@ -895,31 +1105,45 @@ export default function Members() {
 
     const member = paymentModalMember;
     const newRenewalDate = paymentForm.newRenewalDate;
+    const isDirectDebit = paymentForm.directDebit;
+    const debitOpt = isDirectDebit
+      ? (findPeriodOption(directDebitOptions, paymentForm.periodKey) ??
+        directDebitOptions[0])
+      : undefined;
+    const debitMonths =
+      debitOpt?.months ?? (paymentForm.periodKey === "12m" ? 12 : 6);
     setSubmittingRenewal(true);
 
     try {
-      const { receipt, synced } = await registerSubscriptionPayment({
-        memberId: member.id,
-        memberName: memberFullName(member),
-        amount,
-        concept: "RENEWAL",
-        method: paymentForm.method,
-        periodKey: paymentForm.periodKey,
-      });
-
-      setPaymentModalMember(null);
-      setSubscriptionTicketReceipt(receipt);
-
-      if (synced) {
-        toast.success("Membresía renovada", {
-          description: `Pago $${amount.toFixed(2)} registrado en POS.`,
-        });
-      } else {
-        toast.warning("Pago guardado localmente", {
-          description: "No se pudo registrar el cobro en el POS API.",
-        });
+      // Etapa 1: cobro POS. En domiciliado no se cobra hoy: las mensualidades
+      // se domicilian a tarjeta, por lo que se salta directo a la actualización.
+      if (!renewalPaymentDone && !isDirectDebit) {
+        try {
+          const { receipt } = await registerSubscriptionPayment({
+            memberId: member.id,
+            memberName: memberFullName(member),
+            amount,
+            concept: "RENEWAL",
+            method: paymentForm.method,
+            periodKey: paymentForm.periodKey,
+            localFallback: false,
+          });
+          setSubscriptionTicketReceipt(receipt);
+          setRenewalPaymentDone(true);
+        } catch (error) {
+          toast.error("No se pudo registrar el cobro", {
+            description: `${
+              error instanceof Error
+                ? error.message
+                : "Error inesperado en el POS."
+            } No se actualizó la vigencia; reintenta el cobro.`,
+            duration: 12_000,
+          });
+          return;
+        }
       }
 
+      // Etapa 2: actualizar vigencia y precios en catálogo.
       const clientId = clientIdFromMemberId(member.id);
       if (clientId) {
         const digits = normalizePhoneDigits(member.phone ?? "");
@@ -940,31 +1164,44 @@ export default function Members() {
           enrollmentDate: member.enrollmentDate,
           renewalDate: newRenewalDate,
           idDocumentDataUrl: member.idDocumentDataUrl,
-          isDirectDebit: member.isDirectDebit === true,
-          regularPrice:
-            member.isDirectDebit === true ? 0 : (member.regularPrice ?? 0),
-          directDebitPrice:
-            member.isDirectDebit === true ? (member.directDebitPrice ?? 0) : 0,
+          // Actualiza modalidad y precio según lo elegido en la renovación.
+          isDirectDebit,
+          priceRegular: isDirectDebit ? 0 : amount,
+          priceDirectDebit: isDirectDebit ? amount : 0,
+          priceBranchFrequencyID: paymentForm.priceBranchFrequencyID,
         });
-        if (updateResult.ok) {
-          setMembers((prev) => {
-            const next = prev.map((m) =>
-              m.id === member.id
-                ? { ...updateResult.member, renewalDate: newRenewalDate }
-                : m,
-            );
-            saveMembers(next);
-            return next;
-          });
-        } else {
-          applyRenewalDateLocally(member.id, newRenewalDate);
-          toast.warning("Vigencia actualizada solo en la app", {
-            description: updateResult.message,
-          });
+        if (!updateResult.ok) {
+          toast.warning(
+            isDirectDebit
+              ? "No se pudo actualizar la domiciliación"
+              : "Cobro registrado; falta actualizar la vigencia",
+            {
+              description: `${updateResult.message} Reintenta: solo se repetirá la actualización${isDirectDebit ? "" : ", no el cobro"}.`,
+              duration: 12_000,
+            },
+          );
+          return;
         }
+        setMembers((prev) => {
+          const next = prev.map((m) =>
+            m.id === member.id
+              ? { ...updateResult.member, renewalDate: newRenewalDate }
+              : m,
+          );
+          saveMembers(next);
+          return next;
+        });
       } else {
         applyRenewalDateLocally(member.id, newRenewalDate);
       }
+
+      setPaymentModalMember(null);
+      setRenewalPaymentDone(false);
+      toast.success("Membresía renovada", {
+        description: isDirectDebit
+          ? `Domiciliado: ${debitMonths} cargos de $${amount.toFixed(2)} a tarjeta (total $${formatMxnAmount(amount * debitMonths)}).`
+          : `Pago $${amount.toFixed(2)} registrado en POS.`,
+      });
     } catch (error) {
       toast.error("No se pudo registrar la renovación", {
         description:
@@ -975,16 +1212,45 @@ export default function Members() {
     }
   };
 
-  const openAddMemberModal = () => {
-    setNewMemberForm(emptyNewMemberForm());
-    setShowAddMemberModal(true);
+  const clearStep1Error = (field: AddMemberStep1Field) => {
+    setStep1Errors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
   };
 
-  const submitNewMember = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const closeAddMemberModal = () => {
+    setShowAddMemberModal(false);
+    setAddMemberStep(1);
+    setCreatedMemberSummary(null);
+    setWizardMember(null);
+    setWizardPaymentDone(false);
+    setWizardSync(null);
+    setBranchPrices([]);
+    setBranchPricesLoading(false);
+    setStep1Errors({});
+    setShowPurchaseConfirmModal(false);
+    setNewMemberForm(emptyNewMemberForm());
+  };
+
+  const openAddMemberModal = () => {
+    setNewMemberForm(emptyNewMemberForm());
+    setAddMemberStep(1);
+    setCreatedMemberSummary(null);
+    setWizardMember(null);
+    setWizardPaymentDone(false);
+    setWizardSync(null);
+    setStep1Errors({});
+    setShowPurchaseConfirmModal(false);
+    setShowAddMemberModal(true);
+    void loadBranchPrices();
+  };
+
+  const validateAddMemberStep1 = (): boolean => {
     const firstName = newMemberForm.firstName.trim();
     const lastName = newMemberForm.lastName.trim();
-    const fullName = memberFullName({ firstName, lastName });
     const emailRaw = newMemberForm.email.trim();
     const emailNorm = emailRaw.toLowerCase();
     const dial = newMemberForm.phoneCountryDial.trim();
@@ -993,98 +1259,215 @@ export default function Members() {
       .trim()
       .replace(/\s+/g, " ");
 
-    if (!firstName || !lastName) {
-      toast.error("Nombres y apellidos son obligatorios.");
-      return;
+    const errors: AddMemberStep1Errors = {};
+    const messages: string[] = [];
+
+    if (!firstName) {
+      errors.firstName = "Falta indicar los nombres";
+      messages.push("Nombres");
+    }
+    if (!lastName) {
+      errors.lastName = "Falta indicar los apellidos";
+      messages.push("Apellidos");
     }
 
     const hasMemberPhone = isValidNationalPhone(national);
     const hasEmergencyPhone = isValidNationalPhone(emergencyNational);
-
-    if (!hasMemberPhone) {
-      toast.error("El teléfono de contacto del miembro es obligatorio.");
-      return;
-    }
-
     const localDigits = normalizePhoneDigits(national);
-    const fullDigits = `${dial}${localDigits}`;
-    if (fullDigits.length < 11) {
-      toast.error("El teléfono del miembro parece incompleto. Revisa prefijo y dígitos.");
-      return;
-    }
+    const fullDigits = localDigits ? `${dial}${localDigits}` : "";
 
-    if (emergencyNational && !hasEmergencyPhone) {
-      toast.error("El teléfono de emergencia parece incompleto.");
-      return;
-    }
-
-    const emergencyDigits = hasEmergencyPhone
-      ? normalizePhoneDigits(emergencyNational)
-      : "";
-    const emergencyFullDigits = emergencyDigits ? `${dial}${emergencyDigits}` : "";
-
-    if (members.some((m) => normalizePhoneDigits(m.phone ?? "") === fullDigits)) {
-      toast.error("Ya existe un miembro con ese número.");
-      return;
-    }
-
-    if (
-      emergencyFullDigits &&
-      members.some((m) => normalizePhoneDigits(m.phone ?? "") === emergencyFullDigits)
+    if (!national) {
+      errors.phoneNational = "Falta el teléfono de contacto";
+      messages.push("Teléfono de contacto");
+    } else if (!hasMemberPhone || fullDigits.length < 11) {
+      errors.phoneNational = "Revisa el número (mín. 10 dígitos)";
+      messages.push("Teléfono de contacto incompleto");
+    } else if (
+      members.some((m) => normalizePhoneDigits(m.phone ?? "") === fullDigits)
     ) {
-      toast.error("Ya existe un miembro con ese teléfono de emergencia.");
-      return;
+      errors.phoneNational = "Este número ya está registrado";
+      messages.push("Ya existe un miembro con ese teléfono de contacto");
     }
 
-    const phoneForApi = localDigits;
-    const phoneDisplay = `+${dial} ${national}`.replace(/\s+$/, "");
-    if (emailNorm) {
+    if (!emergencyNational) {
+      errors.emergencyPhoneNational = "Falta el teléfono de emergencia";
+      messages.push("Teléfono de emergencia");
+    } else if (!hasEmergencyPhone) {
+      errors.emergencyPhoneNational = "Revisa el número (mín. 10 dígitos)";
+      messages.push("Teléfono de emergencia incompleto");
+    } else {
+      const emergencyDigits = normalizePhoneDigits(emergencyNational);
+      const emergencyFullDigits = `${dial}${emergencyDigits}`;
+      if (
+        members.some(
+          (m) => normalizePhoneDigits(m.phone ?? "") === emergencyFullDigits,
+        )
+      ) {
+        errors.emergencyPhoneNational = "Este número ya está en uso";
+        messages.push("El teléfono de emergencia ya está en uso");
+      }
+    }
+
+    if (!emailNorm) {
+      errors.email = "Falta indicar el correo electrónico";
+      messages.push("Correo electrónico");
+    } else {
       const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm);
       if (!emailOk) {
-        toast.error("Correo no válido.");
-        return;
+        errors.email = "El formato del correo no es válido";
+        messages.push("Correo electrónico no válido");
+      } else if (
+        members.some((m) => (m.email ?? "").toLowerCase() === emailNorm)
+      ) {
+        errors.email = "Este correo ya está registrado";
+        messages.push("Ya existe un miembro con ese correo");
       }
-      if (members.some((m) => (m.email ?? "").toLowerCase() === emailNorm)) {
-        toast.error("Ya existe un miembro con ese correo.");
-        return;
+    }
+
+    setStep1Errors(errors);
+
+    if (messages.length > 0) {
+      toast.error("No se puede continuar", {
+        description: `Completa: ${messages.join(", ")}.`,
+        duration: 10_000,
+      });
+      return false;
+    }
+
+    return true;
+  };
+
+  const validateAddMemberStep2 = (): boolean => {
+    if (!newMemberForm.selectedPeriodKey) {
+      toast.error("Selecciona una vigencia de membresía.");
+      return false;
+    }
+    if (newMemberForm.directDebit) {
+      if (
+        newMemberForm.selectedPeriodKey !== "6m" &&
+        newMemberForm.selectedPeriodKey !== "12m"
+      ) {
+        toast.error("En pago domiciliado elige 6 o 12 meses.");
+        return false;
       }
     }
     const enroll = newMemberForm.enrollmentDate;
     const renew = newMemberForm.renewalDate;
     const renewMax = renewalWindowMaxIso(enroll);
     if (renew < enroll || renew > renewMax) {
-      toast.error("La renovación debe estar entre la fecha de alta y como máximo un año después.");
-      return;
+      toast.error(
+        "La renovación debe estar entre la fecha de alta y como máximo 18 meses después.",
+      );
+      return false;
     }
-    const paymentAmount = parseFloat(newMemberForm.subscriptionCost);
-    if (Number.isNaN(paymentAmount) || paymentAmount <= 0) {
+    const membershipAmount = parseFloat(newMemberForm.membershipCost);
+    if (Number.isNaN(membershipAmount) || membershipAmount <= 0) {
       toast.error(
         newMemberForm.directDebit
-          ? "Indica un costo de suscripción válido para el pago domiciliado."
-          : "Indica un costo de suscripción válido (precio regular).",
+          ? "Indica un cobro mensual válido para la membresía domiciliada."
+          : "Indica un costo válido para la membresía.",
       );
+      return false;
+    }
+    if (newMemberForm.chargeSubscriptionFee) {
+      const fee = parseFloat(newMemberForm.subscriptionFee);
+      if (Number.isNaN(fee) || fee <= 0) {
+        toast.error("Indica un monto válido para la cuota de suscripción.");
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const goAddMemberNext = () => {
+    if (addMemberStep === 1) {
+      // Paso 1 es 100% local: valida y avanza; el alta se hace junto al cobro.
+      if (!validateAddMemberStep1()) return;
+      setStep1Errors({});
+      setAddMemberStep(2);
       return;
     }
-    const addressTrim = newMemberForm.address.trim();
-    setSavingNewMember(true);
+    if (addMemberStep === 2) {
+      if (!validateAddMemberStep2()) return;
+      if (wizardPaymentDone) {
+        setAddMemberStep(3);
+        return;
+      }
+      setShowPurchaseConfirmModal(true);
+    }
+  };
 
+  const goAddMemberBack = () => {
+    if (wizardSync) return;
+    if (addMemberStep === 2) setAddMemberStep(1);
+    else if (addMemberStep === 3) setAddMemberStep(2);
+  };
+
+  const buildClientFieldsFromForm = () => {
+    const firstName = newMemberForm.firstName.trim();
+    const lastName = newMemberForm.lastName.trim();
+    const fullName = memberFullName({ firstName, lastName });
+    const emailNorm = newMemberForm.email.trim().toLowerCase();
+    const dial = newMemberForm.phoneCountryDial.trim();
+    const national = newMemberForm.phoneNational.trim().replace(/\s+/g, " ");
+    const emergencyNational = newMemberForm.emergencyPhoneNational
+      .trim()
+      .replace(/\s+/g, " ");
+    const hasEmergencyPhone = isValidNationalPhone(emergencyNational);
+    const phoneForApi = normalizePhoneDigits(national);
+    const phoneDisplay = `+${dial} ${national}`.replace(/\s+$/, "");
+    const membershipAmount = parseFloat(newMemberForm.membershipCost);
+    const subscriptionFeeAmount = parseFloat(newMemberForm.subscriptionFee);
+    const addressTrim = newMemberForm.address.trim();
+    return {
+      firstName,
+      lastName,
+      fullName,
+      emailNorm,
+      dial,
+      national,
+      emergencyNational,
+      hasEmergencyPhone,
+      phoneForApi,
+      phoneDisplay,
+      membershipAmount,
+      subscriptionFeeAmount,
+      addressTrim,
+    };
+  };
+
+  /**
+   * Etapa 1 del cobro: alta del cliente en catálogo.
+   * Devuelve el miembro creado, o null si falló (no se intenta el cobro).
+   * Idempotente: si ya existe `wizardMember`, lo reutiliza sin llamar al API.
+   */
+  const runWizardClientRegistration = async (
+    f: ReturnType<typeof buildClientFieldsFromForm>,
+  ): Promise<Member | null> => {
+    if (wizardMember) return wizardMember;
+
+    setWizardSync("client");
     try {
       const apiResult = await addClientUseCase({
-        firstName,
-        lastName,
-        email: emailNorm || undefined,
-        phoneNumber: phoneForApi,
-        phoneCodeNumber: dial,
-        emergencyPhoneNumber: hasEmergencyPhone ? emergencyNational : undefined,
-        emergencyPhoneCodeNumber: hasEmergencyPhone ? dial : undefined,
-        fullAddress: addressTrim || undefined,
+        firstName: f.firstName,
+        lastName: f.lastName,
+        email: f.emailNorm,
+        phoneNumber: f.phoneForApi,
+        phoneCodeNumber: f.dial,
+        emergencyPhoneNumber: f.hasEmergencyPhone
+          ? f.emergencyNational
+          : undefined,
+        emergencyPhoneCodeNumber: f.hasEmergencyPhone ? f.dial : undefined,
+        fullAddress: f.addressTrim || undefined,
         planID: DEFAULT_MEMBER_PLAN_ID,
         enrollmentDate: newMemberForm.enrollmentDate,
         renewalDate: newMemberForm.renewalDate,
         idDocumentDataUrl: newMemberForm.idDocumentDataUrl,
         isDirectDebit: newMemberForm.directDebit,
-        regularPrice: newMemberForm.directDebit ? 0 : paymentAmount,
-        directDebitPrice: newMemberForm.directDebit ? paymentAmount : 0,
+        priceRegular: newMemberForm.directDebit ? 0 : f.membershipAmount,
+        priceDirectDebit: newMemberForm.directDebit ? f.membershipAmount : 0,
+        priceBranchFrequencyID: newMemberForm.priceBranchFrequencyID,
+        isPromotionalSubscription: !newMemberForm.chargeSubscriptionFee,
       });
 
       if (!apiResult.ok) {
@@ -1093,95 +1476,213 @@ export default function Members() {
             ? ` (HTTP ${apiResult.statusCode})`
             : "";
         toast.error(`No se pudo registrar el miembro${statusSuffix}`, {
-          description: apiResult.message || "Sin detalle del servidor.",
+          description: `${apiResult.message || "Sin detalle del servidor."} No se realizó ningún cobro.`,
           duration: 12_000,
         });
-        return;
+        return null;
       }
 
-      let row = apiResult.member;
-      const emergencyDisplay = hasEmergencyPhone
-        ? `+${dial} ${emergencyNational}`.replace(/\s+$/, "")
-        : undefined;
-      row = {
-        ...row,
-        phone: phoneDisplay,
-        dateAdded: row.dateAdded || new Date().toISOString(),
-        ...(emergencyDisplay ? { emergencyPhone: emergencyDisplay } : {}),
+      const row: Member = {
+        ...apiResult.member,
+        phone: f.phoneDisplay,
+        dateAdded: apiResult.member.dateAdded || new Date().toISOString(),
+        ...(f.hasEmergencyPhone
+          ? {
+              emergencyPhone: `+${f.dial} ${f.emergencyNational}`.replace(
+                /\s+$/,
+                "",
+              ),
+            }
+          : {}),
         ...(newMemberForm.idDocumentDataUrl
           ? { idDocumentDataUrl: newMemberForm.idDocumentDataUrl }
           : {}),
         ...(newMemberForm.directDebit
-          ? { isDirectDebit: true, directDebitPrice: paymentAmount, regularPrice: 0 }
-          : { isDirectDebit: false, regularPrice: paymentAmount, directDebitPrice: 0 }),
+          ? {
+              isDirectDebit: true,
+              directDebitPrice: f.membershipAmount,
+              regularPrice: 0,
+            }
+          : {
+              isDirectDebit: false,
+              regularPrice: f.membershipAmount,
+              directDebitPrice: 0,
+            }),
       };
 
-      if (newMemberForm.enrollFaceId) {
-        try {
-          const res = await mockFaceIdEnroll({
-            terminalId: newMemberForm.faceIdTerminal,
-            memberId: row.id,
-            displayName: fullName,
-          });
-          row = {
-            ...row,
-            faceIdTemplateId: res.templateId,
-            faceIdEnrolled: true,
-          };
-        } catch {
-          toast.warning("No se vinculó el rostro", {
-            description:
-              "Complete el alta FaceID desde Control de acceso cuando el lector esté disponible.",
-          });
-        }
-      }
-
+      setWizardMember(row);
       setMembers((prev) => {
         const next = [row, ...prev];
         saveMembers(next);
         return next;
       });
-      if (newMemberForm.payNow) {
-        const { receipt, synced } = await registerSubscriptionPayment({
-          memberId: row.id,
-          memberName: fullName,
-          amount: paymentAmount,
-          concept: "MEMBERSHIP",
-          method: newMemberForm.paymentMethod,
-          periodKey: newMemberForm.selectedPeriodKey,
-        });
-        if (!synced) {
-          toast.warning("Miembro registrado; pago solo en almacén local", {
-            description: "No se pudo registrar el cobro en el POS API.",
-          });
-        }
-        setSubscriptionTicketReceipt(receipt);
-      }
       setMembersFromApi(true);
-      setShowAddMemberModal(false);
       setExpandedMember(row.id);
       setCurrentPage(1);
-      setSearchTerm("");
-      setFilterExpiry("ALL");
-      toast.success("Miembro registrado", {
-        description:
-          newMemberForm.payNow
-            ? `${fullName} · ${row.id} · Pago $${paymentAmount.toFixed(2)} registrado`
-            : newMemberForm.enrollFaceId && row.faceIdEnrolled
-              ? `${fullName} · ${row.id} · Rostro registrado`
-              : `${fullName} · ${row.id}`,
-      });
+      return row;
     } catch (error) {
       toast.error("No se pudo registrar el miembro", {
-        description:
+        description: `${
           error instanceof Error
             ? error.message
-            : "Error inesperado al guardar el miembro.",
+            : "Error inesperado al guardar el miembro."
+        } No se realizó ningún cobro.`,
         duration: 12_000,
       });
+      return null;
     } finally {
-      setSavingNewMember(false);
+      setWizardSync(null);
     }
+  };
+
+  /**
+   * Etapa 2 del cobro: solo el pago en POS (sin respaldo local, para
+   * poder reintentarlo). Devuelve true si el cobro quedó registrado.
+   */
+  const runWizardPayment = async (
+    row: Member,
+    f: ReturnType<typeof buildClientFieldsFromForm>,
+  ): Promise<boolean> => {
+    const posTotal =
+      (newMemberForm.chargeSubscriptionFee ? f.subscriptionFeeAmount : 0) +
+      (newMemberForm.directDebit ? 0 : f.membershipAmount);
+
+    setWizardSync("payment");
+    try {
+      if (posTotal > 0) {
+        const { receipt } = await registerSubscriptionPayment({
+          memberId: row.id,
+          memberName: f.fullName,
+          amount: posTotal,
+          concept: "MEMBERSHIP",
+          method: newMemberForm.directDebit
+            ? "CARD"
+            : newMemberForm.paymentMethod,
+          periodKey: newMemberForm.selectedPeriodKey,
+          localFallback: false,
+        });
+        setSubscriptionTicketReceipt(receipt);
+      }
+
+      setWizardPaymentDone(true);
+      setCreatedMemberSummary({
+        id: row.id,
+        name: f.fullName,
+        faceIdEnrolled: Boolean(row.faceIdEnrolled),
+        subscriptionPaid:
+          posTotal > 0 && newMemberForm.chargeSubscriptionFee,
+        subscriptionFee: newMemberForm.chargeSubscriptionFee
+          ? f.subscriptionFeeAmount
+          : 0,
+        membershipAmount: f.membershipAmount,
+        directDebit: newMemberForm.directDebit,
+      });
+      toast.success("Miembro registrado y cobro sincronizado", {
+        description:
+          posTotal > 0
+            ? `${f.fullName} · Total $${posTotal.toFixed(2)}`
+            : `${f.fullName} · Sin cobro POS en esta alta`,
+      });
+      return true;
+    } catch (error) {
+      toast.error("El alta se completó, pero falló el cobro", {
+        description: `${
+          error instanceof Error ? error.message : "Error inesperado en el POS."
+        } Reintenta solo el cobro; el miembro no se duplicará.`,
+        duration: 12_000,
+      });
+      return false;
+    } finally {
+      setWizardSync(null);
+    }
+  };
+
+  /**
+   * Paso 2: alta + cobro como etapas separadas y reintenables.
+   * Si falla el alta, no se cobra. Si falla solo el cobro,
+   * el reintento salta el alta y solo repite el pago.
+   */
+  const confirmPurchaseAndContinue = async () => {
+    if (!validateAddMemberStep2()) return;
+    if (wizardPaymentDone) {
+      setShowPurchaseConfirmModal(false);
+      setAddMemberStep(3);
+      return;
+    }
+
+    const f = buildClientFieldsFromForm();
+
+    const row = await runWizardClientRegistration(f);
+    if (!row) return;
+
+    const paid = await runWizardPayment(row, f);
+    if (!paid) return;
+
+    setShowPurchaseConfirmModal(false);
+    setAddMemberStep(3);
+  };
+
+  /** Paso 3: Face ID (opcional). */
+  const completeFaceIdStep = async (opts: { enrollFaceId: boolean }) => {
+    if (!wizardMember) {
+      toast.error("No hay miembro creado. Regresa al paso 1.");
+      setAddMemberStep(1);
+      return;
+    }
+
+    let row = wizardMember;
+    const fullName = memberFullName(row);
+
+    if (opts.enrollFaceId) {
+      setWizardSync("faceid");
+      try {
+        const res = await mockFaceIdEnroll({
+          terminalId: newMemberForm.faceIdTerminal,
+          memberId: row.id,
+          displayName: fullName,
+        });
+        row = {
+          ...row,
+          faceIdTemplateId: res.templateId,
+          faceIdEnrolled: true,
+        };
+      } catch {
+        toast.warning("No se vinculó el rostro", {
+          description:
+            "Complete el alta FaceID desde Control de acceso cuando el lector esté disponible.",
+        });
+      } finally {
+        setWizardSync(null);
+      }
+    }
+
+    setWizardMember(row);
+    setMembers((prev) => {
+      const next = prev.map((m) => (m.id === row.id ? row : m));
+      saveMembers(next);
+      return next;
+    });
+    setCreatedMemberSummary((prev) =>
+      prev
+        ? { ...prev, faceIdEnrolled: Boolean(row.faceIdEnrolled) }
+        : {
+            id: row.id,
+            name: fullName,
+            faceIdEnrolled: Boolean(row.faceIdEnrolled),
+            subscriptionPaid: wizardPaymentDone,
+            subscriptionFee: newMemberForm.chargeSubscriptionFee
+              ? parseFloat(newMemberForm.subscriptionFee) || 0
+              : 0,
+            membershipAmount: parseFloat(newMemberForm.membershipCost) || 0,
+            directDebit: newMemberForm.directDebit,
+          }
+    );
+    setFilterExpiry("ALL");
+    setSearchTerm("");
+    setAddMemberStep(4);
+    toast.success("Alta completada", {
+      description: `${fullName} · ${row.id}`,
+    });
   };
 
   return (
@@ -1900,35 +2401,132 @@ export default function Members() {
             <form onSubmit={submitRenewal} className="space-y-4">
               <div>
                 <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                  Forma de pago
+                  {branchPricesLoading ? (
+                    <span className="ml-2 inline-flex items-center gap-1 font-medium normal-case tracking-normal text-[#5a5a5a]">
+                      <Loader2 className="animate-spin" size={12} />
+                      precios…
+                    </span>
+                  ) : null}
+                </label>
+                <div className="flex border border-[rgba(93,63,60,0.25)] overflow-hidden">
+                  <button
+                    type="button"
+                    disabled={renewalPaymentDone}
+                    onClick={() => {
+                      const opt =
+                        findPeriodOption(directPayOptions, "1m") ??
+                        directPayOptions[0];
+                      if (!opt) return;
+                      const base = renewalBaseDate(paymentModalMember);
+                      const { newRenewalDate, cost } = extendMembershipPeriod(
+                        base,
+                        opt,
+                      );
+                      setPaymentForm((f) => ({
+                        ...f,
+                        directDebit: false,
+                        periodKey: opt.key,
+                        priceBranchFrequencyID: opt.priceBranchFrequencyID,
+                        amount: cost,
+                        newRenewalDate,
+                      }));
+                    }}
+                    className={`flex-1 px-3 py-2 text-[10px] font-bold uppercase tracking-wide transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      !paymentForm.directDebit
+                        ? "bg-[#e31e24]/15 text-white border-b-2 border-[#e31e24]"
+                        : "bg-[#0e0e0e] text-[#808080] hover:text-[#e5e2e1]"
+                    }`}
+                  >
+                    Pago directo
+                  </button>
+                  <button
+                    type="button"
+                    disabled={renewalPaymentDone}
+                    onClick={() => {
+                      const opt =
+                        findPeriodOption(
+                          directDebitOptions,
+                          paymentForm.periodKey === "12m" ? "12m" : "6m",
+                        ) ?? directDebitOptions[0];
+                      if (!opt) return;
+                      const base = renewalBaseDate(paymentModalMember);
+                      const { newRenewalDate, cost } = extendMembershipPeriod(
+                        base,
+                        opt,
+                        true,
+                      );
+                      setPaymentForm((f) => ({
+                        ...f,
+                        directDebit: true,
+                        method: "CARD",
+                        periodKey: opt.key,
+                        priceBranchFrequencyID: opt.priceBranchFrequencyID,
+                        amount: cost,
+                        newRenewalDate,
+                      }));
+                    }}
+                    className={`flex-1 px-3 py-2 text-[10px] font-bold uppercase tracking-wide transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      paymentForm.directDebit
+                        ? "bg-[#e31e24]/15 text-white border-b-2 border-[#e31e24]"
+                        : "bg-[#0e0e0e] text-[#808080] hover:text-[#e5e2e1]"
+                    }`}
+                  >
+                    Domiciliado
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
                   Periodo de vigencia
+                  {paymentForm.directDebit ? (
+                    <span className="ml-1 font-medium normal-case tracking-normal text-[#5a5a5a]">
+                      · precio = cobro mensual
+                    </span>
+                  ) : null}
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {SUBSCRIPTION_PERIOD_OPTIONS.map(({ key, label }) => {
-                    const active = paymentForm.periodKey === key;
-                    const price = getSubscriptionPrice(key);
+                  {(paymentForm.directDebit
+                    ? directDebitOptions
+                    : directPayOptions
+                  ).map((opt) => {
+                    const active = paymentForm.periodKey === opt.key;
                     return (
                       <button
-                        key={key}
+                        key={opt.priceBranchFrequencyID}
                         type="button"
+                        disabled={renewalPaymentDone}
                         onClick={() => {
                           const base = renewalBaseDate(paymentModalMember);
-                          const { newRenewalDate, cost } = extendMembershipPeriod(base, key);
+                          const { newRenewalDate, cost } =
+                            extendMembershipPeriod(
+                              base,
+                              opt,
+                              paymentForm.directDebit,
+                            );
                           setPaymentForm((f) => ({
                             ...f,
-                            periodKey: key,
+                            periodKey: opt.key,
+                            priceBranchFrequencyID: opt.priceBranchFrequencyID,
                             amount: cost,
                             newRenewalDate,
                           }));
                         }}
-                        className={`px-3 py-2 text-[10px] font-bold border transition-colors ${
+                        className={`px-3 py-2 text-[10px] font-bold border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                           active
                             ? "bg-[#e31e24]/15 border-[#e31e24]/50 text-white"
                             : "bg-[#0e0e0e] border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24]"
                         }`}
                       >
-                        <span className="block uppercase tracking-wide">{label}</span>
+                        <span className="block uppercase tracking-wide">{opt.label}</span>
                         <span className="block text-[11px] mt-0.5 tabular-nums">
-                          ${price.toLocaleString("es-MX")}
+                          $
+                          {formatMxnAmount(
+                            paymentForm.directDebit
+                              ? opt.priceDirectDebit
+                              : opt.priceRegular,
+                          )}
+                          {paymentForm.directDebit ? "/mes" : ""}
                         </span>
                       </button>
                     );
@@ -1945,34 +2543,90 @@ export default function Members() {
               </div>
               <div>
                 <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                  Monto (MXN)
+                  {paymentForm.directDebit
+                    ? "Cobro mensual (MXN)"
+                    : "Monto (MXN)"}
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
                   value={paymentForm.amount}
+                  disabled={renewalPaymentDone}
                   onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none font-['Space_Grotesk',sans-serif]"
+                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none font-['Space_Grotesk',sans-serif] disabled:opacity-60 disabled:cursor-not-allowed"
                   required
                 />
                 <p className="text-[#5a5a5a] text-[10px] mt-1">
                   Se actualiza al elegir el periodo; puedes ajustarlo si aplica descuento.
                 </p>
               </div>
+              {paymentForm.directDebit ? (
+                <div className="rounded-sm border border-[rgba(93,63,60,0.2)] bg-[#0e0e0e] px-3 py-2.5 text-[11px]">
+                  <p className="text-[#808080] text-[9px] font-bold uppercase tracking-wide mb-1.5">
+                    Simulación de cobro domiciliado
+                  </p>
+                  {(() => {
+                    const opt =
+                      findPeriodOption(
+                        directDebitOptions,
+                        paymentForm.periodKey,
+                      ) ?? directDebitOptions[0];
+                    const months =
+                      opt?.months ?? (paymentForm.periodKey === "12m" ? 12 : 6);
+                    const monthly = parseFloat(paymentForm.amount) || 0;
+                    return (
+                      <ul className="space-y-1 text-[#b0b0b0]">
+                        <li className="flex justify-between gap-2">
+                          <span>
+                            {months} cargos × ${formatMxnAmount(monthly)}
+                          </span>
+                          <span className="tabular-nums font-bold text-[#e5e2e1]">
+                            ${formatMxnAmount(monthly * months)}
+                          </span>
+                        </li>
+                        <li className="flex justify-between gap-2 border-t border-[rgba(93,63,60,0.15)] pt-1.5 text-[#e5e2e1]">
+                          <span className="font-bold">
+                            Total proyectado en el periodo
+                          </span>
+                          <span className="tabular-nums font-black text-[#e31e24]">
+                            ${formatMxnAmount(monthly * months)}
+                          </span>
+                        </li>
+                      </ul>
+                    );
+                  })()}
+                  <p className="text-[#5a5a5a] text-[10px] mt-2 leading-relaxed">
+                    Los cargos se domicilian a tarjeta; hoy no se registra cobro
+                    en el POS.
+                  </p>
+                </div>
+              ) : null}
+              {renewalPaymentDone ? (
+                <div className="rounded-sm border border-[#e31e24]/40 bg-[#e31e24]/10 px-3 py-2.5 text-[11px] text-[#ffb4ae] leading-relaxed">
+                  El cobro ya quedó registrado en el POS. Al reintentar solo se
+                  actualizará la vigencia; no se cobrará de nuevo.
+                </div>
+              ) : null}
               <div>
                 <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
                   Método de pago
+                  {paymentForm.directDebit ? (
+                    <span className="ml-1 font-medium normal-case tracking-normal text-[#5a5a5a]">
+                      · domiciliado a tarjeta
+                    </span>
+                  ) : null}
                 </label>
                 <select
-                  value={paymentForm.method}
+                  value={paymentForm.directDebit ? "CARD" : paymentForm.method}
+                  disabled={renewalPaymentDone || paymentForm.directDebit}
                   onChange={(e) =>
                     setPaymentForm({
                       ...paymentForm,
                       method: e.target.value as typeof paymentForm.method,
                     })
                   }
-                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none"
+                  className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <option value="CARD">Tarjeta</option>
                   <option value="CASH">Efectivo</option>
@@ -1997,6 +2651,8 @@ export default function Members() {
                       <Loader2 size={14} className="animate-spin" />
                       Procesando…
                     </>
+                  ) : renewalPaymentDone ? (
+                    "Reintentar actualización"
                   ) : (
                     "Confirmar renovación"
                   )}
@@ -2013,97 +2669,221 @@ export default function Members() {
             className="flex min-h-[100dvh] w-full box-border items-start justify-center p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:items-center sm:p-4 sm:py-10"
             role="presentation"
             onMouseDown={(e) => {
-              if (e.target === e.currentTarget) setShowAddMemberModal(false);
+              if (
+                e.target === e.currentTarget &&
+                addMemberStep !== 4 &&
+                !wizardSync
+              ) {
+                closeAddMemberModal();
+              }
             }}
           >
             <div
               role="dialog"
               aria-modal="true"
               aria-labelledby="add-member-title"
-              className="relative w-full max-w-lg min-w-0 shrink-0 border border-[rgba(93,63,60,0.2)] bg-[#131313] p-5 shadow-2xl sm:p-6 md:p-8 lg:max-w-4xl lg:p-10 xl:max-w-5xl 2xl:max-w-6xl"
+              className={`relative w-full min-w-0 shrink-0 border border-[rgba(93,63,60,0.2)] bg-[#131313] p-5 shadow-2xl sm:p-6 md:p-8 ${
+                addMemberStep === 2
+                  ? "max-w-lg lg:max-w-5xl lg:h-[min(720px,88dvh)] lg:flex lg:flex-col"
+                  : "max-w-lg lg:max-w-3xl"
+              }`}
               onMouseDown={(e) => e.stopPropagation()}
             >
-            <div className="mb-6 flex justify-between items-start gap-3">
-              <div className="min-w-0 flex-1 pr-2">
-                <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">
-                  Nuevo miembro
-                </p>
-                <h3 id="add-member-title" className="text-[#e5e2e1] text-[clamp(1.125rem,4vw,1.375rem)] font-black uppercase tracking-tight break-words">
-                  Alta en directorio
-                </h3>
-                <p className="text-[#808080] text-[11px] mt-2 leading-relaxed break-words">
-                  El teléfono de contacto del miembro es obligatorio. El de emergencia es opcional.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAddMemberModal(false)}
-                className="text-[#808080] hover:text-[#e31e24] transition-colors shrink-0 rounded p-0.5"
-                aria-label="Cerrar"
-              >
-                <X size={22} />
-              </button>
-            </div>
+              {wizardSync ? (
+                <div
+                  className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#131313]/92 px-6"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Loader2 className="animate-spin text-[#e31e24]" size={36} />
+                  <p className="text-[#e5e2e1] text-[12px] font-bold tracking-[1.5px] uppercase text-center">
+                    {wizardSync === "client" && "Sincronizando cliente…"}
+                    {wizardSync === "payment" && "Sincronizando cobro…"}
+                    {wizardSync === "faceid" && "Sincronizando Face ID…"}
+                  </p>
+                </div>
+              ) : null}
 
-            <form
-              onSubmit={submitNewMember}
-              className="min-w-0 max-w-full space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8 lg:gap-y-5 lg:space-y-0 xl:grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] xl:gap-x-12 2xl:gap-x-14"
-            >
-              {/* Columna: datos de contacto y expediente */}
-              <div className="flex min-w-0 flex-col gap-4 lg:gap-5">
-                <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2 xl:gap-x-4 xl:gap-y-4">
-                  <div className="min-w-0">
-                    <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                      Nombres
-                    </label>
-                    <input
-                      type="text"
-                      value={newMemberForm.firstName}
-                      onChange={(e) => setNewMemberForm({ ...newMemberForm, firstName: e.target.value })}
-                      placeholder="Ej. Ana María"
-                      className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none font-['Space_Grotesk',sans-serif] text-[13px] sm:text-[14px]"
-                      required
-                      autoFocus
-                    />
+              <div className="mb-5 flex justify-between items-start gap-3">
+                <div className="min-w-0 flex-1 pr-2">
+                  <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">
+                    Nuevo miembro
+                  </p>
+                  <h3
+                    id="add-member-title"
+                    className="text-[#e5e2e1] text-[clamp(1.125rem,4vw,1.375rem)] font-black uppercase tracking-tight break-words"
+                  >
+                    {addMemberStep === 1 && "Datos del cliente"}
+                    {addMemberStep === 2 && "Suscripción y membresía"}
+                    {addMemberStep === 3 && "Alta Face ID"}
+                    {addMemberStep === 4 && "Alta completada"}
+                  </h3>
+                </div>
+                {addMemberStep !== 4 ? (
+                  <button
+                    type="button"
+                    onClick={closeAddMemberModal}
+                    disabled={Boolean(wizardSync)}
+                    className="text-[#808080] hover:text-[#e31e24] transition-colors shrink-0 rounded p-0.5 disabled:opacity-40"
+                    aria-label="Cerrar"
+                  >
+                    <X size={22} />
+                  </button>
+                ) : null}
+              </div>
+
+              {/* Stepper */}
+              <ol className="mb-6 flex flex-wrap items-center gap-2 sm:gap-3">
+                {ADD_MEMBER_WIZARD_STEPS.map(({ step, label, optional }) => {
+                  const done = addMemberStep > step;
+                  const active = addMemberStep === step;
+                  return (
+                    <li key={step} className="flex items-center gap-2 min-w-0">
+                      <span
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                          done
+                            ? "bg-[#e31e24] text-white"
+                            : active
+                              ? "bg-[#e31e24]/20 text-[#e31e24] ring-1 ring-[#e31e24]/50"
+                              : "bg-[#0e0e0e] text-[#5a5a5a] ring-1 ring-[rgba(93,63,60,0.25)]"
+                        }`}
+                      >
+                        {done ? <Check size={14} /> : step}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wide ${
+                          active ? "text-[#e5e2e1]" : "text-[#5a5a5a]"
+                        }`}
+                      >
+                        {label}
+                        {optional ? (
+                          <span className="ml-1 font-medium normal-case text-[#4a4a4a]">
+                            (opc.)
+                          </span>
+                        ) : null}
+                      </span>
+                      {step < 4 ? (
+                        <span className="hidden sm:inline text-[#393939] mx-1">/</span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ol>
+
+              {/* Paso 1: datos */}
+              {addMemberStep === 1 && (
+                <div className="min-w-0 space-y-4">
+                  <p className="text-[#808080] text-[11px] leading-relaxed">
+                    Obligatorios (*): nombres, apellidos, teléfono de contacto, teléfono de
+                    emergencia y correo. La identificación es opcional.
+                  </p>
+                  {Object.keys(step1Errors).length > 0 ? (
+                    <div
+                      role="alert"
+                      className="rounded-sm border border-[#e31e24]/45 bg-[#e31e24]/10 px-3 py-2.5 text-[11px] text-[#ff8a80] leading-relaxed"
+                    >
+                      <p className="font-bold uppercase tracking-wide text-[#ff6b6b] mb-1.5">
+                        No se puede continuar
+                      </p>
+                      <p className="text-[#ffb4ae] mb-2">
+                        Completa estos datos para pasar al siguiente paso:
+                      </p>
+                      <ul className="space-y-1">
+                        {(
+                          Object.entries(step1Errors) as [
+                            AddMemberStep1Field,
+                            string,
+                          ][]
+                        ).map(([key, msg]) => (
+                          <li key={key} className="flex gap-2">
+                            <span className="text-[#e31e24] shrink-0">•</span>
+                            <span>
+                              <span className="font-semibold text-[#ffc9c4]">
+                                {STEP1_FIELD_LABELS[key]}:
+                              </span>{" "}
+                              {msg}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                        Nombres <span className="text-[#e31e24]">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={newMemberForm.firstName}
+                        onChange={(e) => {
+                          clearStep1Error("firstName");
+                          setNewMemberForm({ ...newMemberForm, firstName: e.target.value });
+                        }}
+                        placeholder="Ej. Ana María"
+                        aria-invalid={Boolean(step1Errors.firstName)}
+                        className={`w-full min-w-0 box-border bg-[#0e0e0e] border text-[#e5e2e1] px-4 py-3 focus:outline-none text-[13px] sm:text-[14px] ${
+                          step1Errors.firstName ? fieldErrorClass : fieldOkClass
+                        }`}
+                        autoFocus
+                      />
+                      {step1Errors.firstName ? (
+                        <p className="mt-1 text-[10px] text-[#ff6b6b]">{step1Errors.firstName}</p>
+                      ) : null}
+                    </div>
+                    <div className="min-w-0">
+                      <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                        Apellidos <span className="text-[#e31e24]">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={newMemberForm.lastName}
+                        onChange={(e) => {
+                          clearStep1Error("lastName");
+                          setNewMemberForm({ ...newMemberForm, lastName: e.target.value });
+                        }}
+                        placeholder="Ej. García López"
+                        aria-invalid={Boolean(step1Errors.lastName)}
+                        className={`w-full min-w-0 box-border bg-[#0e0e0e] border text-[#e5e2e1] px-4 py-3 focus:outline-none text-[13px] sm:text-[14px] ${
+                          step1Errors.lastName ? fieldErrorClass : fieldOkClass
+                        }`}
+                      />
+                      {step1Errors.lastName ? (
+                        <p className="mt-1 text-[10px] text-[#ff6b6b]">{step1Errors.lastName}</p>
+                      ) : null}
+                    </div>
                   </div>
+
                   <div className="min-w-0">
-                    <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                      Apellidos
-                    </label>
-                    <input
-                      type="text"
-                      value={newMemberForm.lastName}
-                      onChange={(e) => setNewMemberForm({ ...newMemberForm, lastName: e.target.value })}
-                      placeholder="Ej. García López"
-                      className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none font-['Space_Grotesk',sans-serif] text-[13px] sm:text-[14px]"
-                      required
-                    />
-                  </div>
-                  <div className="min-w-0 xl:col-span-2">
                     <label className="flex items-center gap-2 text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
                       <MessageCircle size={12} className="text-[#25d366] shrink-0" />
-                      WhatsApp / teléfono del miembro
+                      WhatsApp / teléfono del miembro{" "}
+                      <span className="text-[#e31e24]">*</span>
                     </label>
                     <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-stretch">
                       <div ref={phonePrefixRef} className="relative w-full shrink-0 sm:w-[5.25rem]">
                         <button
                           type="button"
                           onClick={() => setPhonePrefixMenuOpen((o) => !o)}
-                          className="flex h-full min-h-[46px] w-full items-center justify-between gap-1 border border-[rgba(93,63,60,0.2)] bg-[#0e0e0e] px-2.5 py-3 text-left text-[#e5e2e1] focus:border-[#e31e24] focus:outline-none [color-scheme:dark] text-[13px] sm:text-[14px]"
+                          className={`flex h-full min-h-[46px] w-full items-center justify-between gap-1 border bg-[#0e0e0e] px-2.5 py-3 text-left text-[#e5e2e1] focus:outline-none text-[13px] ${
+                            step1Errors.phoneNational ? fieldErrorClass : fieldOkClass
+                          }`}
                           aria-expanded={phonePrefixMenuOpen}
-                          aria-haspopup="listbox"
-                          aria-label="Prefijo de país"
                         >
-                          <span className="font-mono tabular-nums">+{newMemberForm.phoneCountryDial}</span>
+                          <span className="font-mono tabular-nums">
+                            +{newMemberForm.phoneCountryDial}
+                          </span>
                           <ChevronDown
                             size={14}
-                            className={`shrink-0 text-[#808080] transition-transform ${phonePrefixMenuOpen ? "rotate-180" : ""}`}
+                            className={`shrink-0 text-[#808080] transition-transform ${
+                              phonePrefixMenuOpen ? "rotate-180" : ""
+                            }`}
                           />
                         </button>
                         {phonePrefixMenuOpen ? (
                           <ul
                             role="listbox"
-                            className="absolute left-0 right-0 z-30 mt-1 max-h-48 overflow-auto border border-[rgba(93,63,60,0.25)] bg-[#0e0e0e] py-1 shadow-xl sm:left-0 sm:right-auto sm:min-w-[14rem]"
+                            className="absolute left-0 right-0 z-30 mt-1 max-h-48 overflow-auto border border-[rgba(93,63,60,0.25)] bg-[#0e0e0e] py-1 shadow-xl sm:min-w-[14rem]"
                           >
                             {PHONE_COUNTRY_PREFIXES.map((p) => (
                               <li key={p.dial} role="none">
@@ -2111,16 +2891,21 @@ export default function Members() {
                                   type="button"
                                   role="option"
                                   aria-selected={newMemberForm.phoneCountryDial === p.dial}
-                                  className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[12px] sm:text-[13px] hover:bg-[#1a1a1a] ${
-                                    newMemberForm.phoneCountryDial === p.dial ? "bg-[#1a1a1a] text-[#e31e24]" : "text-[#e5e2e1]"
+                                  className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[12px] hover:bg-[#1a1a1a] ${
+                                    newMemberForm.phoneCountryDial === p.dial
+                                      ? "bg-[#1a1a1a] text-[#e31e24]"
+                                      : "text-[#e5e2e1]"
                                   }`}
                                   onClick={() => {
-                                    setNewMemberForm({ ...newMemberForm, phoneCountryDial: p.dial });
+                                    setNewMemberForm({
+                                      ...newMemberForm,
+                                      phoneCountryDial: p.dial,
+                                    });
                                     setPhonePrefixMenuOpen(false);
                                   }}
                                 >
-                                  <span className="min-w-0 text-[11px] sm:text-[12px] text-[#b0b0b0]">{p.country}</span>
-                                  <span className="shrink-0 font-mono tabular-nums">+{p.dial}</span>
+                                  <span className="text-[#b0b0b0]">{p.country}</span>
+                                  <span className="font-mono">+{p.dial}</span>
                                 </button>
                               </li>
                             ))}
@@ -2130,95 +2915,116 @@ export default function Members() {
                       <input
                         type="tel"
                         inputMode="numeric"
-                        autoComplete="tel-national"
                         value={newMemberForm.phoneNational}
-                        onChange={(e) =>
-                          setNewMemberForm({ ...newMemberForm, phoneNational: e.target.value })
-                        }
+                        onChange={(e) => {
+                          clearStep1Error("phoneNational");
+                          setNewMemberForm({
+                            ...newMemberForm,
+                            phoneNational: e.target.value,
+                          });
+                        }}
                         placeholder="55 1234 5678"
-                        required
-                        className="min-w-0 flex-1 box-border border border-[rgba(93,63,60,0.2)] bg-[#0e0e0e] px-4 py-3 font-['Space_Grotesk',sans-serif] text-[#e5e2e1] focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px]"
+                        aria-invalid={Boolean(step1Errors.phoneNational)}
+                        className={`min-w-0 flex-1 box-border border bg-[#0e0e0e] px-4 py-3 text-[#e5e2e1] focus:outline-none text-[13px] ${
+                          step1Errors.phoneNational ? fieldErrorClass : fieldOkClass
+                        }`}
                       />
                     </div>
+                    {step1Errors.phoneNational ? (
+                      <p className="mt-1 text-[10px] text-[#ff6b6b]">
+                        {step1Errors.phoneNational}
+                      </p>
+                    ) : null}
                   </div>
-                  <div className="min-w-0 xl:col-span-2">
+
+                  <div className="min-w-0">
                     <label className="flex items-center gap-2 text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
                       <Phone size={12} className="text-[#e31e24] shrink-0" />
-                      Teléfono de emergencia{" "}
-                      <span className="normal-case tracking-normal font-medium text-[#5a5a5a]">
-                        (opcional)
-                      </span>
+                      Teléfono de emergencia <span className="text-[#e31e24]">*</span>
                     </label>
-                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-stretch">
-                      <div className="w-full shrink-0 sm:w-[5.25rem]">
-                        <div className="flex h-full min-h-[46px] w-full items-center justify-center border border-[rgba(93,63,60,0.2)] bg-[#131313] px-2.5 py-3 font-mono text-[#808080] text-[13px] sm:text-[14px]">
-                          +{newMemberForm.phoneCountryDial}
-                        </div>
+                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+                      <div
+                        className={`flex min-h-[46px] w-full sm:w-[5.25rem] items-center justify-center border bg-[#131313] px-2.5 font-mono text-[#808080] text-[13px] ${
+                          step1Errors.emergencyPhoneNational
+                            ? "border-[#e31e24]/70"
+                            : "border-[rgba(93,63,60,0.2)]"
+                        }`}
+                      >
+                        +{newMemberForm.phoneCountryDial}
                       </div>
                       <input
                         type="tel"
                         inputMode="numeric"
-                        autoComplete="tel-national"
                         value={newMemberForm.emergencyPhoneNational}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          clearStep1Error("emergencyPhoneNational");
                           setNewMemberForm({
                             ...newMemberForm,
                             emergencyPhoneNational: e.target.value,
-                          })
-                        }
+                          });
+                        }}
                         placeholder="Contacto de emergencia"
-                        className="min-w-0 flex-1 box-border border border-[rgba(93,63,60,0.2)] bg-[#0e0e0e] px-4 py-3 font-['Space_Grotesk',sans-serif] text-[#e5e2e1] focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px]"
+                        aria-invalid={Boolean(step1Errors.emergencyPhoneNational)}
+                        className={`min-w-0 flex-1 box-border border bg-[#0e0e0e] px-4 py-3 text-[#e5e2e1] focus:outline-none text-[13px] ${
+                          step1Errors.emergencyPhoneNational
+                            ? fieldErrorClass
+                            : fieldOkClass
+                        }`}
                       />
                     </div>
+                    {step1Errors.emergencyPhoneNational ? (
+                      <p className="mt-1 text-[10px] text-[#ff6b6b]">
+                        {step1Errors.emergencyPhoneNational}
+                      </p>
+                    ) : null}
                   </div>
-                </div>
 
-                <div className="min-w-0">
-                  <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                    Correo electrónico{" "}
-                    <span className="font-normal normal-case text-[#5a5a5a]">(opcional)</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={newMemberForm.email}
-                    onChange={(e) => setNewMemberForm({ ...newMemberForm, email: e.target.value })}
-                    placeholder="correo@ejemplo.com"
-                    className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none font-['Space_Grotesk',sans-serif] text-[13px] sm:text-[14px]"
-                  />
-                </div>
+                  <div className="min-w-0">
+                    <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                      Correo electrónico <span className="text-[#e31e24]">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      value={newMemberForm.email}
+                      onChange={(e) => {
+                        clearStep1Error("email");
+                        setNewMemberForm({ ...newMemberForm, email: e.target.value });
+                      }}
+                      placeholder="correo@ejemplo.com"
+                      aria-invalid={Boolean(step1Errors.email)}
+                      className={`w-full box-border bg-[#0e0e0e] border text-[#e5e2e1] px-4 py-3 focus:outline-none text-[13px] ${
+                        step1Errors.email ? fieldErrorClass : fieldOkClass
+                      }`}
+                    />
+                    {step1Errors.email ? (
+                      <p className="mt-1 text-[10px] text-[#ff6b6b]">{step1Errors.email}</p>
+                    ) : null}
+                  </div>
 
-              <div className="min-w-0">
-                <label className="flex items-center gap-2 text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                  <MapPin size={12} className="text-[#e31e24] shrink-0" />
-                  Domicilio
-                </label>
-                <textarea
-                  value={newMemberForm.address}
-                  onChange={(e) => setNewMemberForm({ ...newMemberForm, address: e.target.value })}
-                  placeholder="Calle, número, colonia, CP, ciudad, estado"
-                  rows={3}
-                  className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none font-['Space_Grotesk',sans-serif] text-[13px] sm:text-[14px] resize-y min-h-[80px] placeholder:text-[#5a5a5a]"
-                />
-               
-              </div>
+                  <div className="min-w-0">
+                    <label className="flex items-center gap-2 text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                      <MapPin size={12} className="text-[#e31e24] shrink-0" />
+                      Domicilio
+                    </label>
+                    <textarea
+                      value={newMemberForm.address}
+                      onChange={(e) =>
+                        setNewMemberForm({ ...newMemberForm, address: e.target.value })
+                      }
+                      placeholder="Calle, número, colonia, CP, ciudad, estado"
+                      rows={3}
+                      className="w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none text-[13px] resize-y min-h-[80px] placeholder:text-[#5a5a5a]"
+                    />
+                  </div>
 
-              <div className="min-w-0 overflow-hidden rounded-sm bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4">
-                <p className="flex items-center gap-2 text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase">
-                  <IdCard size={14} className="text-[#e31e24]" />
-                  Identificación oficial{" "}
-                  <span className="font-normal normal-case text-[#5a5a5a]">(opcional)</span>
-                </p>
-                <div
-                  className={
-                    newMemberForm.idDocumentDataUrl
-                      ? "mt-3 grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start xl:gap-5"
-                      : "mt-3 space-y-3"
-                  }
-                >
-                  <div className="min-w-0 space-y-3">
-                    <p className="text-[#5a5a5a] text-[9px] leading-relaxed">
-                      Puedes adjuntarla después. Importa archivo o abre la cámara (vista previa en vivo y captura).
-                      Requiere permiso del navegador; en escritorio muchos equipos solo abren cámara vía este visor.
+                  <div className="min-w-0 overflow-hidden rounded-sm bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4">
+                    <p className="flex items-center gap-2 text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase">
+                      <IdCard size={14} className="text-[#e31e24]" />
+                      Identificación oficial{" "}
+                      <span className="font-normal normal-case text-[#5a5a5a]">(opcional)</span>
+                    </p>
+                    <p className="mt-2 text-[#5a5a5a] text-[9px] leading-relaxed">
+                      Puedes adjuntarla después. Importa archivo o toma foto con la cámara.
                     </p>
                     <input
                       ref={idFileInputRef}
@@ -2227,297 +3033,875 @@ export default function Members() {
                       className="hidden"
                       onChange={handleIdDocumentFile}
                     />
-                    <div className="flex flex-wrap gap-2">
+                    <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => idFileInputRef.current?.click()}
-                        className="inline-flex items-center gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wide bg-[#131313] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24] transition-colors"
+                        className="inline-flex items-center gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wide bg-[#131313] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24]"
                       >
                         <Upload size={14} />
-                        Importar imagen
+                        Importar
                       </button>
                       <button
                         type="button"
                         onClick={() => setShowIdCameraModal(true)}
-                        className="inline-flex items-center gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wide bg-[#131313] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24] transition-colors"
+                        className="inline-flex items-center gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wide bg-[#131313] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24]"
                       >
                         <Camera size={14} />
                         Tomar foto
                       </button>
-                      {newMemberForm.idDocumentDataUrl && (
+                      {newMemberForm.idDocumentDataUrl ? (
                         <button
                           type="button"
-                          onClick={() => setNewMemberForm((f) => ({ ...f, idDocumentDataUrl: null }))}
-                          className="inline-flex items-center gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-[#808080] hover:text-[#e31e24] border border-transparent hover:border-[rgba(227,30,36,0.35)] transition-colors"
+                          onClick={() =>
+                            setNewMemberForm((f) => ({ ...f, idDocumentDataUrl: null }))
+                          }
+                          className="inline-flex items-center gap-2 px-3 py-2 text-[10px] font-bold uppercase text-[#808080] hover:text-[#e31e24]"
                         >
-                          Quitar archivo
+                          Quitar
                         </button>
-                      )}
+                      ) : null}
                     </div>
+                    {newMemberForm.idDocumentDataUrl ? (
+                      <div className="mt-3 max-h-[180px] overflow-hidden rounded border border-[rgba(93,63,60,0.2)] bg-[#131313]">
+                        <img
+                          src={newMemberForm.idDocumentDataUrl}
+                          alt="Vista previa identificación"
+                          className="w-full h-auto max-h-[180px] object-contain"
+                        />
+                      </div>
+                    ) : null}
                   </div>
-                  {newMemberForm.idDocumentDataUrl && (
-                    <div className="relative min-w-0 rounded border border-[rgba(93,63,60,0.2)] overflow-hidden bg-[#131313] max-h-[200px] xl:max-h-[min(320px,45vh)] xl:sticky xl:top-0">
-                      <img
-                        src={newMemberForm.idDocumentDataUrl}
-                        alt="Vista previa identificación"
-                        className="w-full h-auto max-h-[200px] xl:max-h-[min(320px,45vh)] object-contain"
-                      />
-                    </div>
-                  )}
                 </div>
-              </div>
-              </div>
+              )}
 
-              {/* Columna: suscripción, fechas y acceso */}
-              <div className="flex min-w-0 flex-col gap-4 border-[rgba(93,63,60,0.08)] lg:gap-5 lg:border-l lg:pl-8 xl:pl-12">
-              <div>
-                <p className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                  Periodo de vigencia
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {SUBSCRIPTION_PERIOD_OPTIONS.map(({ key, label, period }) => {
-                    const active = newMemberForm.selectedPeriodKey === key;
-                    return (
+              {/* Paso 2: cuota de entrada + membresía */}
+              {addMemberStep === 2 && (
+                <div className="min-w-0 flex-1 min-h-0 lg:overflow-y-auto lg:pr-1">
+                <div className="min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(260px,320px)] lg:gap-8 lg:items-start">
+                  <div className="min-w-0 space-y-4">
+                    {/* Suscripción compacta */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-sm border border-[rgba(93,63,60,0.15)] bg-[#0e0e0e] px-3 py-2.5">
+                      <Wallet size={14} className="text-[#e31e24] shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[#e5e2e1] text-[11px] font-bold uppercase tracking-wide leading-none">
+                          Suscripción
+                        </p>
+                        <p className="text-[#5a5a5a] text-[9px] mt-0.5">
+                          Cuota de entrada · opcional
+                        </p>
+                      </div>
                       <button
-                        key={key}
                         type="button"
+                        role="switch"
+                        aria-checked={newMemberForm.chargeSubscriptionFee}
+                        aria-label="Cobrar cuota de suscripción"
                         onClick={() => {
-                          const { renewalDate, cost } = applySubscriptionPeriod(
-                            newMemberForm.enrollmentDate,
-                            key,
-                          );
                           setNewMemberForm((f) => ({
                             ...f,
-                            selectedPeriodKey: key,
-                            renewalDate,
-                            subscriptionCost: cost,
+                            chargeSubscriptionFee: !f.chargeSubscriptionFee,
                           }));
                         }}
-                        className={`px-3 py-2 text-[10px] font-bold uppercase tracking-wide border transition-colors ${
-                          active
-                            ? "bg-[#e31e24]/15 border-[#e31e24]/50 text-white"
-                            : "bg-[#0e0e0e] border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24] hover:text-white"
+                        className={`relative h-6 w-10 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed ${
+                          newMemberForm.chargeSubscriptionFee
+                            ? "bg-[#e31e24]"
+                            : "bg-[#2a2a2a]"
                         }`}
                       >
-                        {label}
+                        <span
+                          className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                            newMemberForm.chargeSubscriptionFee
+                              ? "translate-x-4"
+                              : "translate-x-0"
+                          }`}
+                        />
                       </button>
-                    );
-                  })}
-                </div>
-              </div>
+                      <div
+                        className={`w-full sm:w-auto sm:min-w-[9.5rem] transition-opacity ${
+                          newMemberForm.chargeSubscriptionFee
+                            ? "opacity-100"
+                            : "opacity-40"
+                        }`}
+                      >
+                        <div className="relative">
+                          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] text-[#808080]">
+                            $
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            disabled={!newMemberForm.chargeSubscriptionFee}
+                            value={newMemberForm.subscriptionFee}
+                            onChange={(e) =>
+                              setNewMemberForm((f) => ({
+                                ...f,
+                                subscriptionFee: e.target.value,
+                              }))
+                            }
+                            className="w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] pl-6 pr-3 py-2 focus:border-[#e31e24] focus:outline-none text-[13px] font-bold tabular-nums disabled:cursor-not-allowed"
+                          />
+                        </div>
+                      </div>
+                    </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-4 min-w-0">
-                <div className="min-w-0">
-                  <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                    Alta (enrollment)
-                  </label>
-                  <input
-                    type="date"
-                    value={newMemberForm.enrollmentDate}
-                    onChange={(e) => {
-                      const ed = e.target.value;
-                      setNewMemberForm((f) => {
-                        const { renewalDate, cost } = applySubscriptionPeriod(
-                          ed,
-                          f.selectedPeriodKey,
+                    {/* Tabs membresía */}
+                    <div>
+                      <p className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                        Membresía
+                        {branchPricesLoading ? (
+                          <span className="ml-2 inline-flex items-center gap-1 font-medium normal-case tracking-normal text-[#5a5a5a]">
+                            <Loader2 className="animate-spin" size={12} />
+                            precios…
+                          </span>
+                        ) : null}
+                      </p>
+                      <div className="flex border border-[rgba(93,63,60,0.25)] overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const opt =
+                              findPeriodOption(
+                                directPayOptions,
+                                newMemberForm.selectedPeriodKey,
+                              ) ??
+                              findPeriodOption(directPayOptions, "1m") ??
+                              directPayOptions[0];
+                            const {
+                              renewalDate,
+                              cost,
+                              priceBranchFrequencyID,
+                            } = applySubscriptionPeriod(
+                              newMemberForm.enrollmentDate,
+                              opt,
+                            );
+                            setNewMemberForm((f) => ({
+                              ...f,
+                              directDebit: false,
+                              chargeSubscriptionFee: true,
+                              selectedPeriodKey: opt.key,
+                              priceBranchFrequencyID,
+                              renewalDate,
+                              membershipCost: cost,
+                            }));
+                          }}
+                          className={`flex-1 px-3 py-2 text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                            !newMemberForm.directDebit
+                              ? "bg-[#e31e24]/15 text-white border-b-2 border-[#e31e24]"
+                              : "bg-[#0e0e0e] text-[#808080] hover:text-[#e5e2e1]"
+                          }`}
+                        >
+                          Pago directo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const opt =
+                              findPeriodOption(
+                                directDebitOptions,
+                                newMemberForm.selectedPeriodKey === "12m"
+                                  ? "12m"
+                                  : "6m",
+                              ) ?? directDebitOptions[0];
+                            if (!opt) return;
+                            const { renewalDate, monthlyPrice } =
+                              applyDirectDebitPeriod(
+                                newMemberForm.enrollmentDate,
+                                opt,
+                              );
+                            setNewMemberForm((f) => ({
+                              ...f,
+                              directDebit: true,
+                              chargeSubscriptionFee: false,
+                              paymentMethod: "CARD",
+                              selectedPeriodKey: opt.key,
+                              priceBranchFrequencyID: opt.priceBranchFrequencyID,
+                              renewalDate,
+                              membershipCost: monthlyPrice.toFixed(2),
+                            }));
+                          }}
+                          className={`flex-1 px-3 py-2 text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                            newMemberForm.directDebit
+                              ? "bg-[#e31e24]/15 text-white border-b-2 border-[#e31e24]"
+                              : "bg-[#0e0e0e] text-[#808080] hover:text-[#e5e2e1]"
+                          }`}
+                        >
+                          Domiciliado
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                        Vigencia
+                        {newMemberForm.directDebit ? (
+                          <span className="ml-1 font-medium normal-case tracking-normal text-[#5a5a5a]">
+                            · precio = cobro mensual
+                          </span>
+                        ) : null}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {newMemberForm.directDebit
+                          ? directDebitOptions.map((opt) => {
+                              const active =
+                                newMemberForm.selectedPeriodKey === opt.key;
+                              const months = opt.months ?? 6;
+                              const monthly = opt.priceDirectDebit;
+                              return (
+                                <button
+                                  key={opt.priceBranchFrequencyID}
+                                  type="button"
+                                  onClick={() => {
+                                    const { renewalDate, monthlyPrice } =
+                                      applyDirectDebitPeriod(
+                                        newMemberForm.enrollmentDate,
+                                        opt,
+                                      );
+                                    setNewMemberForm((f) => ({
+                                      ...f,
+                                      selectedPeriodKey: opt.key,
+                                      priceBranchFrequencyID:
+                                        opt.priceBranchFrequencyID,
+                                      renewalDate,
+                                      membershipCost: monthlyPrice.toFixed(2),
+                                    }));
+                                  }}
+                                  className={`min-w-[6rem] px-3 py-2 text-left border transition-colors ${
+                                    active
+                                      ? "bg-[#e31e24]/15 border-[#e31e24]/50 text-white"
+                                      : "bg-[#0e0e0e] border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24]"
+                                  }`}
+                                >
+                                  <span className="block text-[10px] font-bold uppercase tracking-wide">
+                                    {opt.label}
+                                  </span>
+                                  <span className="block text-[12px] font-bold tabular-nums mt-0.5 text-[#e31e24]">
+                                    ${formatMxnAmount(monthly)}
+                                    <span className="text-[9px] font-medium text-[#808080]">
+                                      /mes
+                                    </span>
+                                  </span>
+                                  <span className="block text-[9px] text-[#5a5a5a] mt-0.5 tabular-nums">
+                                    ≈ ${formatMxnAmount(monthly * months)} total
+                                  </span>
+                                </button>
+                              );
+                            })
+                          : directPayOptions.map((opt) => {
+                              const active =
+                                newMemberForm.selectedPeriodKey === opt.key;
+                              return (
+                                <button
+                                  key={opt.priceBranchFrequencyID}
+                                  type="button"
+                                  onClick={() => {
+                                    const {
+                                      renewalDate,
+                                      cost,
+                                      priceBranchFrequencyID,
+                                    } = applySubscriptionPeriod(
+                                      newMemberForm.enrollmentDate,
+                                      opt,
+                                    );
+                                    setNewMemberForm((f) => ({
+                                      ...f,
+                                      selectedPeriodKey: opt.key,
+                                      priceBranchFrequencyID,
+                                      renewalDate,
+                                      membershipCost: cost,
+                                    }));
+                                  }}
+                                  className={`min-w-[5.5rem] px-3 py-2 text-left border transition-colors ${
+                                    active
+                                      ? "bg-[#e31e24]/15 border-[#e31e24]/50 text-white"
+                                      : "bg-[#0e0e0e] border-[rgba(93,63,60,0.25)] text-[#e5e2e1] hover:border-[#e31e24]"
+                                  }`}
+                                >
+                                  <span className="block text-[10px] font-bold uppercase tracking-wide">
+                                    {opt.label}
+                                  </span>
+                                  <span className="block text-[12px] font-bold tabular-nums mt-0.5 text-[#e31e24]">
+                                    ${formatMxnAmount(opt.priceRegular)}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                      </div>
+                    </div>
+
+                    {newMemberForm.directDebit &&
+                    (newMemberForm.selectedPeriodKey === "6m" ||
+                      newMemberForm.selectedPeriodKey === "12m") ? (
+                      <div className="rounded-sm border border-[rgba(93,63,60,0.2)] bg-[#131313] px-3 py-2.5 text-[11px] min-h-[108px]">
+                        <p className="text-[#808080] text-[9px] font-bold uppercase tracking-wide mb-1.5">
+                          Simulación de cobro domiciliado
+                        </p>
+                        {(() => {
+                          const opt =
+                            findPeriodOption(
+                              directDebitOptions,
+                              newMemberForm.selectedPeriodKey,
+                            ) ?? directDebitOptions[0];
+                          if (!opt) return null;
+                          const sim = applyDirectDebitPeriod(
+                            newMemberForm.enrollmentDate,
+                            opt,
+                          );
+                          const feeOn = newMemberForm.chargeSubscriptionFee
+                            ? parseFloat(newMemberForm.subscriptionFee) || 0
+                            : 0;
+                          return (
+                            <ul className="space-y-1 text-[#b0b0b0]">
+                              <li className="flex justify-between gap-2">
+                                <span>
+                                  {sim.months} cargos × $
+                                  {formatMxnAmount(sim.monthlyPrice)}
+                                </span>
+                                <span className="tabular-nums font-bold text-[#e5e2e1]">
+                                  ${formatMxnAmount(sim.projectedTotal)}
+                                </span>
+                              </li>
+                              {feeOn > 0 ? (
+                                <li className="flex justify-between gap-2">
+                                  <span>Cuota de suscripción (hoy)</span>
+                                  <span className="tabular-nums font-bold text-[#e5e2e1]">
+                                    ${formatMxnAmount(feeOn)}
+                                  </span>
+                                </li>
+                              ) : null}
+                              <li className="flex justify-between gap-2 border-t border-[rgba(93,63,60,0.15)] pt-1.5 text-[#e5e2e1]">
+                                <span className="font-bold">
+                                  Proyectado en el periodo
+                                </span>
+                                <span className="tabular-nums font-black text-[#e31e24]">
+                                  ${formatMxnAmount(sim.projectedTotal + feeOn)}
+                                </span>
+                              </li>
+                            </ul>
+                          );
+                        })()}
+                      </div>
+                    ) : null}
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="min-w-0">
+                        <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-1.5">
+                          Alta
+                        </label>
+                        <input
+                          type="date"
+                          value={newMemberForm.enrollmentDate}
+                          onChange={(e) => {
+                            const ed = e.target.value;
+                            setNewMemberForm((f) => {
+                              if (f.directDebit) {
+                                const opt =
+                                  findPeriodOption(
+                                    directDebitOptions,
+                                    f.selectedPeriodKey,
+                                  ) ?? directDebitOptions[0];
+                                if (!opt) {
+                                  return { ...f, enrollmentDate: ed };
+                                }
+                                const { renewalDate, monthlyPrice } =
+                                  applyDirectDebitPeriod(ed, opt);
+                                return {
+                                  ...f,
+                                  enrollmentDate: ed,
+                                  renewalDate,
+                                  priceBranchFrequencyID:
+                                    opt.priceBranchFrequencyID,
+                                  membershipCost: monthlyPrice.toFixed(2),
+                                };
+                              }
+                              const opt =
+                                findPeriodOption(
+                                  directPayOptions,
+                                  f.selectedPeriodKey,
+                                ) ??
+                                findPeriodOption(directPayOptions, "1m") ??
+                                directPayOptions[0];
+                              const {
+                                renewalDate,
+                                cost,
+                                priceBranchFrequencyID,
+                              } = applySubscriptionPeriod(ed, opt);
+                              return {
+                                ...f,
+                                enrollmentDate: ed,
+                                renewalDate: clampRenewalDate(ed, renewalDate),
+                                priceBranchFrequencyID,
+                                membershipCost: cost,
+                              };
+                            });
+                          }}
+                          className="w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none text-[13px] [color-scheme:dark]"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-1.5">
+                          Renovación
+                        </label>
+                        <input
+                          type="date"
+                          min={newMemberForm.enrollmentDate}
+                          max={renewalWindowMaxIso(newMemberForm.enrollmentDate)}
+                          value={newMemberForm.renewalDate}
+                          onChange={(e) =>
+                            setNewMemberForm((f) => ({
+                              ...f,
+                              renewalDate: clampRenewalDate(
+                                f.enrollmentDate,
+                                e.target.value,
+                              ),
+                              selectedPeriodKey: null,
+                            }))
+                          }
+                          className="w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none text-[13px] [color-scheme:dark]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Resumen cobro — derecha en desktop */}
+                  <aside className="mt-5 lg:mt-0 min-w-0 rounded-sm border border-[rgba(93,63,60,0.2)] bg-[#0e0e0e] p-4 lg:sticky lg:top-0 space-y-4">
+                    <p className="text-[#e5e2e1] text-[11px] font-bold uppercase tracking-wide">
+                      Resumen de cobro
+                    </p>
+                    <div className="space-y-2 text-[12px]">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#808080]">Suscripción</span>
+                        <span
+                          className={`font-bold tabular-nums ${
+                            newMemberForm.chargeSubscriptionFee
+                              ? "text-[#e5e2e1]"
+                              : "text-[#5a5a5a] line-through"
+                          }`}
+                        >
+                          $
+                          {formatMxnAmount(
+                            parseFloat(newMemberForm.subscriptionFee) || 0,
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#808080]">
+                          {newMemberForm.directDebit
+                            ? "Primera mensualidad"
+                            : "Membresía"}
+                        </span>
+                        <span className="font-bold tabular-nums text-[#e5e2e1]">
+                          $
+                          {formatMxnAmount(
+                            parseFloat(newMemberForm.membershipCost) || 0,
+                          )}
+                        </span>
+                      </div>
+                      <div className="border-t border-[rgba(93,63,60,0.2)] pt-2 flex justify-between gap-3 items-baseline">
+                        <span className="text-[#e5e2e1] text-[11px] font-bold uppercase tracking-wide">
+                          Total a cobrar hoy
+                        </span>
+                        <span className="text-[#e31e24] text-[20px] font-black tabular-nums leading-none">
+                          $
+                          {formatMxnAmount(
+                            (newMemberForm.chargeSubscriptionFee
+                              ? parseFloat(newMemberForm.subscriptionFee) || 0
+                              : 0) +
+                              (newMemberForm.directDebit
+                                ? 0
+                                : parseFloat(newMemberForm.membershipCost) || 0),
+                          )}
+                        </span>
+                      </div>
+                      <p className="text-[#5a5a5a] text-[9px] leading-relaxed">
+                        {newMemberForm.directDebit
+                          ? `La primera mensualidad es de $${formatMxnAmount(parseFloat(newMemberForm.membershipCost) || 0)} (domiciliada a tarjeta). Hoy solo se cobra la cuota de suscripción, si aplica.`
+                          : "Pago directo: cuota + membresía se cobran al confirmar."}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-1.5">
+                        Forma de pago
+                      </label>
+                      {newMemberForm.directDebit ? (
+                        <div className="w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 text-[13px] opacity-70">
+                          Tarjeta
+                          <p className="text-[9px] text-[#5a5a5a] mt-1 normal-case tracking-normal font-medium">
+                            El domiciliado siempre se cobra con tarjeta.
+                          </p>
+                        </div>
+                      ) : (
+                        <select
+                          value={newMemberForm.paymentMethod}
+                          onChange={(e) =>
+                            setNewMemberForm((f) => ({
+                              ...f,
+                              paymentMethod: e.target.value as typeof f.paymentMethod,
+                            }))
+                          }
+                          className="w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none text-[13px]"
+                        >
+                          <option value="CASH">Efectivo</option>
+                          <option value="CARD">Tarjeta</option>
+                          <option value="QR">QR / transferencia</option>
+                        </select>
+                      )}
+                    </div>
+                  </aside>
+                </div>
+                </div>
+              )}
+
+              {/* Paso 3: Face ID opcional */}
+              {addMemberStep === 3 && (
+                <div className="min-w-0 space-y-4">
+                  <div className="rounded-sm bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-5 space-y-4">
+                    <div className="flex items-start gap-3">
+                      <ScanFace size={22} className="text-[#e31e24] shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-[#e5e2e1] text-[14px] font-bold uppercase tracking-wide">
+                          Alta biométrica Face ID
+                        </p>
+                        <p className="text-[#808080] text-[11px] mt-2 leading-relaxed">
+                          Puedes registrar el rostro ahora o omitir este paso y completarlo después
+                          desde Control de acceso.
+                        </p>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
+                        Terminal para captura
+                      </label>
+                      <select
+                        value={newMemberForm.faceIdTerminal}
+                        onChange={(e) =>
+                          setNewMemberForm({
+                            ...newMemberForm,
+                            faceIdTerminal: e.target.value,
+                          })
+                        }
+                        className="w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none text-[12px]"
+                      >
+                        <option value="TRN-MAIN-01">TRN-MAIN-01 — Entrada principal</option>
+                        <option value="TRN-MAIN-02">TRN-MAIN-02 — Entrada lateral</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Paso 4: éxito */}
+              {addMemberStep === 4 && createdMemberSummary && (
+                <div className="min-w-0 py-4 text-center space-y-4">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#e31e24]/15 text-[#e31e24]">
+                    <CheckCircle2 size={32} />
+                  </div>
+                  <div>
+                    <p className="text-[#e5e2e1] text-[18px] font-black uppercase tracking-tight">
+                      {createdMemberSummary.name}
+                    </p>
+                    <p className="text-[#808080] text-[12px] mt-1 font-mono">
+                      {createdMemberSummary.id}
+                    </p>
+                  </div>
+                  <ul className="text-left max-w-sm mx-auto space-y-2 text-[12px] text-[#b0b0b0]">
+                    <li>
+                      {createdMemberSummary.subscriptionPaid
+                        ? `Cuota de suscripción · $${createdMemberSummary.subscriptionFee.toFixed(2)}`
+                        : "Sin cuota de suscripción"}
+                    </li>
+                    <li>
+                      {createdMemberSummary.directDebit
+                        ? `Membresía domiciliada · $${createdMemberSummary.membershipAmount.toFixed(2)}`
+                        : `Membresía pago directo · $${createdMemberSummary.membershipAmount.toFixed(2)}`}
+                    </li>
+                    <li>
+                      Face ID:{" "}
+                      {createdMemberSummary.faceIdEnrolled
+                        ? "registrado"
+                        : "omitido (puedes completarlo después)"}
+                    </li>
+                  </ul>
+                </div>
+              )}
+
+              {/* Acciones del wizard */}
+              <div className="mt-6 flex flex-col-reverse gap-3 border-t border-[rgba(93,63,60,0.15)] pt-4 sm:flex-row sm:gap-3 shrink-0">
+                {addMemberStep === 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={closeAddMemberModal}
+                      disabled={Boolean(wizardSync)}
+                      className="min-h-[44px] w-full sm:flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#1a1a1a] disabled:opacity-50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={goAddMemberNext}
+                      disabled={Boolean(wizardSync)}
+                      className="min-h-[44px] w-full sm:flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] disabled:opacity-50"
+                    >
+                      Continuar
+                    </button>
+                  </>
+                )}
+                {addMemberStep === 2 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={goAddMemberBack}
+                      disabled={Boolean(wizardSync)}
+                      className="min-h-[44px] w-full sm:flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#1a1a1a] disabled:opacity-50"
+                    >
+                      Atrás
+                    </button>
+                    <button
+                      type="button"
+                      onClick={goAddMemberNext}
+                      disabled={Boolean(wizardSync)}
+                      className="min-h-[44px] w-full sm:flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {wizardSync === "payment" ? (
+                        <Loader2 className="animate-spin" size={16} />
+                      ) : null}
+                      {wizardPaymentDone ? "Continuar" : "Pagar"}
+                    </button>
+                  </>
+                )}
+                {addMemberStep === 3 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={goAddMemberBack}
+                      disabled={Boolean(wizardSync)}
+                      className="min-h-[44px] w-full sm:flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#1a1a1a] disabled:opacity-50"
+                    >
+                      Atrás
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(wizardSync)}
+                      onClick={() => void completeFaceIdStep({ enrollFaceId: false })}
+                      className="min-h-[44px] w-full sm:flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.35)] text-[#e5e2e1] py-3 font-bold text-[10px] tracking-[1px] uppercase hover:border-[#e31e24] disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      Omitir Face ID
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(wizardSync)}
+                      onClick={() => void completeFaceIdStep({ enrollFaceId: true })}
+                      className="min-h-[44px] w-full sm:flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {wizardSync === "faceid" ? (
+                        <Loader2 className="animate-spin" size={16} />
+                      ) : null}
+                      Registrar con Face ID
+                    </button>
+                  </>
+                )}
+                {addMemberStep === 4 && (
+                  <button
+                    type="button"
+                    onClick={closeAddMemberModal}
+                    className="min-h-[44px] w-full bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20]"
+                  >
+                    Listo
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPurchaseConfirmModal && (
+        <div
+          className="fixed inset-0 z-[65] flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="purchase-confirm-title"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !wizardSync) {
+              setShowPurchaseConfirmModal(false);
+            }
+          }}
+        >
+          <div
+            className="relative w-full max-w-md border border-[rgba(93,63,60,0.3)] bg-[#131313] p-5 sm:p-6 shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {wizardSync ? (
+              <div
+                className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#131313]/95 px-6"
+                role="status"
+                aria-live="polite"
+              >
+                <Loader2 className="animate-spin text-[#e31e24]" size={36} />
+                <p className="text-[#e5e2e1] text-[12px] font-bold tracking-[1.5px] uppercase text-center">
+                  {wizardSync === "client"
+                    ? "Registrando miembro…"
+                    : "Registrando cobro…"}
+                </p>
+                <p className="text-[#808080] text-[10px] text-center leading-relaxed">
+                  {wizardSync === "client"
+                    ? "Paso 1 de 2 · Alta en catálogo"
+                    : "Paso 2 de 2 · Cobro en POS"}
+                </p>
+              </div>
+            ) : null}
+            <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-2">
+              Confirmar compra
+            </p>
+            <h3
+              id="purchase-confirm-title"
+              className="text-[#e5e2e1] text-[18px] font-black uppercase tracking-tight mb-4"
+            >
+              Resumen de compra
+            </h3>
+            <ul className="space-y-2.5 text-[13px] mb-5">
+              <li className="flex justify-between gap-3 border-b border-[rgba(93,63,60,0.12)] pb-2">
+                <span className="text-[#808080]">Tipo</span>
+                <span className="text-[#e5e2e1] font-bold">
+                  {newMemberForm.directDebit ? "Domiciliado" : "Pago directo"}
+                </span>
+              </li>
+              <li className="flex justify-between gap-3 border-b border-[rgba(93,63,60,0.12)] pb-2">
+                <span className="text-[#808080]">Vigencia</span>
+                <span className="text-[#e5e2e1] font-bold">
+                  {newMemberForm.directDebit
+                    ? directDebitOptions.find(
+                        (p) => p.key === newMemberForm.selectedPeriodKey,
+                      )?.label ?? "—"
+                    : directPayOptions.find(
+                        (p) => p.key === newMemberForm.selectedPeriodKey,
+                      )?.label ?? "—"}
+                </span>
+              </li>
+              <li className="flex justify-between gap-3 border-b border-[rgba(93,63,60,0.12)] pb-2">
+                <span className="text-[#808080]">Suscripción</span>
+                <span className="text-[#e5e2e1] font-bold tabular-nums">
+                  {newMemberForm.chargeSubscriptionFee
+                    ? `$${formatMxnAmount(parseFloat(newMemberForm.subscriptionFee) || 0)}`
+                    : "No aplica"}
+                </span>
+              </li>
+              <li className="flex justify-between gap-3 border-b border-[rgba(93,63,60,0.12)] pb-2">
+                <span className="text-[#808080]">
+                  {newMemberForm.directDebit ? "Primera mensualidad" : "Membresía"}
+                </span>
+                <span className="text-[#e5e2e1] font-bold tabular-nums">
+                  $
+                  {formatMxnAmount(parseFloat(newMemberForm.membershipCost) || 0)}
+                </span>
+              </li>
+              {newMemberForm.directDebit ? (
+                <li className="border-b border-[rgba(93,63,60,0.12)] pb-2">
+                  <p className="text-[#808080] text-[11px] leading-relaxed">
+                    La primera mensualidad domiciliada a tarjeta es de{" "}
+                    <span className="text-[#e5e2e1] font-bold tabular-nums">
+                      $
+                      {formatMxnAmount(
+                        parseFloat(newMemberForm.membershipCost) || 0,
+                      )}
+                    </span>
+                    .
+                    {(newMemberForm.selectedPeriodKey === "6m" ||
+                      newMemberForm.selectedPeriodKey === "12m") &&
+                      (() => {
+                        const debitOpt =
+                          findPeriodOption(
+                            directDebitOptions,
+                            newMemberForm.selectedPeriodKey,
+                          ) ?? directDebitOptions[0];
+                        if (!debitOpt) return null;
+                        return (
+                          <>
+                            {" "}
+                            En el periodo se proyectan{" "}
+                            <span className="text-[#e5e2e1] font-bold tabular-nums">
+                              $
+                              {formatMxnAmount(
+                                applyDirectDebitPeriod(
+                                  newMemberForm.enrollmentDate,
+                                  debitOpt,
+                                ).projectedTotal,
+                              )}
+                            </span>
+                            .
+                          </>
                         );
-                        return {
-                          ...f,
-                          enrollmentDate: ed,
-                          renewalDate: clampRenewalDate(ed, renewalDate),
-                          subscriptionCost: cost,
-                        };
-                      });
-                    }}
-                    className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-3 sm:px-4 focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px] [color-scheme:dark]"
-                    required
-                  />
-                </div>
-                <div className="min-w-0">
-                  <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                    Renovación
-                  </label>
-                  <input
-                    type="date"
-                    min={newMemberForm.enrollmentDate}
-                    max={renewalWindowMaxIso(newMemberForm.enrollmentDate)}
-                    value={newMemberForm.renewalDate}
+                      })()}
+                  </p>
+                </li>
+              ) : null}
+              <li className="border-b border-[rgba(93,63,60,0.12)] pb-2 space-y-1.5">
+                <label className="block text-[#808080] text-[11px]">
+                  Forma de pago
+                </label>
+                {newMemberForm.directDebit ? (
+                  <div className="w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] px-3 py-2.5 text-[13px] font-bold opacity-80">
+                    Tarjeta
+                    <p className="text-[9px] text-[#5a5a5a] mt-1 font-medium">
+                      Domiciliado: solo tarjeta.
+                    </p>
+                  </div>
+                ) : (
+                  <select
+                    value={newMemberForm.paymentMethod}
                     onChange={(e) =>
                       setNewMemberForm((f) => ({
                         ...f,
-                        renewalDate: clampRenewalDate(f.enrollmentDate, e.target.value),
-                        selectedPeriodKey: null,
+                        paymentMethod: e.target.value as typeof f.paymentMethod,
                       }))
                     }
-                    className="w-full min-w-0 max-w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-3 sm:px-4 focus:border-[#e31e24] focus:outline-none text-[13px] sm:text-[14px] [color-scheme:dark]"
-                    required
-                  />
-                  <p className="text-[#393939] text-[9px] mt-1.5 leading-snug">
-                    Permitido: desde la fecha de alta hasta {renewalWindowMaxIso(newMemberForm.enrollmentDate)} (máx. 1 año).
-                  </p>
-                </div>
-              </div>
-
-              <div className="min-w-0 rounded-sm bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4 space-y-4">
-                <div className="flex items-center gap-2 mb-1">
-                  <Wallet size={16} className="text-[#e31e24] shrink-0" />
-                  <p className="text-[#e5e2e1] text-[12px] font-bold uppercase tracking-wide">
-                    Pago de suscripción
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                    Costo de suscripción (MXN)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={newMemberForm.subscriptionCost}
-                    onChange={(e) =>
-                      setNewMemberForm((f) => ({
-                        ...f,
-                        subscriptionCost: e.target.value,
-                        selectedPeriodKey: null,
-                      }))
-                    }
-                    className="w-full min-w-0 max-w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none text-[14px] font-bold tabular-nums"
-                    required
-                  />
-                  <p className="text-[#393939] text-[9px] mt-1.5">
-                    Se llena al elegir un periodo; puedes ajustarlo manualmente.
-                  </p>
-                </div>
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newMemberForm.directDebit}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setNewMemberForm((f) => ({
-                        ...f,
-                        directDebit: checked,
-                        ...(checked ? { payNow: false } : {}),
-                      }));
-                    }}
-                    className="mt-1 w-4 h-4 accent-[#e31e24] rounded border-[rgba(93,63,60,0.4)]"
-                  />
-                  <div>
-                    <span className="text-[#e5e2e1] text-[12px] font-bold">
-                      Pago domiciliado
-                    </span>
-                    <p className="text-[#808080] text-[10px] mt-1 leading-relaxed">
-                      Cargo recurrente automático al banco o tarjeta del miembro. Usa el
-                      costo de suscripción indicado arriba.
-                    </p>
-                  </div>
-                </label>
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newMemberForm.payNow}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setNewMemberForm((f) => ({
-                        ...f,
-                        payNow: checked,
-                        ...(checked ? { directDebit: false } : {}),
-                      }));
-                    }}
-                    disabled={newMemberForm.directDebit}
-                    className="mt-1 w-4 h-4 accent-[#e31e24] rounded border-[rgba(93,63,60,0.4)] disabled:opacity-50"
-                  />
-                  <div>
-                    <span className="text-[#e5e2e1] text-[12px] font-bold">
-                      Registrar pago al guardar
-                    </span>
-                    <p className="text-[#808080] text-[10px] mt-1 leading-relaxed">
-                      Cobra la suscripción en el mismo paso del alta del miembro.
-                    </p>
-                  </div>
-                </label>
-                {newMemberForm.payNow && (
-                  <div>
-                    <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                      Método de pago
-                    </label>
-                    <select
-                      value={newMemberForm.paymentMethod}
-                      onChange={(e) =>
-                        setNewMemberForm((f) => ({
-                          ...f,
-                          paymentMethod: e.target.value as typeof f.paymentMethod,
-                        }))
-                      }
-                      className="w-full min-w-0 max-w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 focus:border-[#e31e24] focus:outline-none text-[13px]"
-                    >
-                      <option value="CASH">Efectivo</option>
-                      <option value="CARD">Tarjeta</option>
-                      <option value="QR">QR / transferencia</option>
-                    </select>
-                  </div>
+                    className="w-full box-border bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none text-[13px] font-bold"
+                  >
+                    <option value="CASH">Efectivo</option>
+                    <option value="CARD">Tarjeta</option>
+                    <option value="QR">QR / transferencia</option>
+                  </select>
                 )}
-              </div>
-
-              <div className="min-w-0 overflow-hidden rounded-sm bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4 space-y-3">
-                <label className="flex items-start gap-3 cursor-pointer group">
-                  <input
-                    type="checkbox"
-                    checked={newMemberForm.enrollFaceId}
-                    onChange={(e) =>
-                      setNewMemberForm({ ...newMemberForm, enrollFaceId: e.target.checked })
-                    }
-                    className="mt-1 w-4 h-4 accent-[#e31e24] rounded border-[rgba(93,63,60,0.4)]"
-                  />
-                  <div>
-                    <span className="flex items-center gap-2 text-[#e5e2e1] text-[12px] font-bold">
-                      <ScanFace size={16} className="text-[#e31e24] shrink-0" />
-                      Dar de alta en FaceID
-                    </span>
-                    <p className="text-[#808080] text-[10px] mt-1 leading-relaxed">
-                      Registra la plantilla facial al guardar, usando el terminal de acceso seleccionado.
-                    </p>
-                  </div>
-                </label>
-                {newMemberForm.enrollFaceId && (
-                  <div>
-                    <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
-                      Terminal para captura
-                    </label>
-                    <select
-                      value={newMemberForm.faceIdTerminal}
-                      onChange={(e) =>
-                        setNewMemberForm({ ...newMemberForm, faceIdTerminal: e.target.value })
-                      }
-                      className="w-full min-w-0 max-w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 sm:px-4 focus:border-[#e31e24] focus:outline-none text-[11px] sm:text-[12px]"
-                    >
-                      <option value="TRN-MAIN-01">TRN-MAIN-01 — Entrada principal</option>
-                      <option value="TRN-MAIN-02">TRN-MAIN-02 — Entrada lateral</option>
-                    </select>
-                  </div>
-                )}
-              </div>
-              </div>
-
-              <div className="flex flex-col-reverse gap-3 border-t border-[rgba(93,63,60,0.15)] pt-3 sm:flex-row sm:gap-3 sm:pt-4 lg:col-span-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddMemberModal(false)}
-                  disabled={savingNewMember}
-                  className="min-h-[44px] w-full sm:flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#1a1a1a] transition-colors disabled:opacity-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingNewMember}
-                  className="min-h-[44px] w-full sm:flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {savingNewMember ? <Loader2 className="animate-spin" size={16} /> : null}
-                  {newMemberForm.payNow ? "Guardar y cobrar" : "Guardar miembro"}
-                </button>
-              </div>
-            </form>
+              </li>
+              <li className="flex justify-between gap-3 items-baseline pt-1">
+                <span className="text-[#e5e2e1] text-[11px] font-bold uppercase tracking-wide">
+                  Total hoy
+                </span>
+                <span className="text-[#e31e24] text-[22px] font-black tabular-nums">
+                  $
+                  {formatMxnAmount(
+                    (newMemberForm.chargeSubscriptionFee
+                      ? parseFloat(newMemberForm.subscriptionFee) || 0
+                      : 0) +
+                      (newMemberForm.directDebit
+                        ? 0
+                        : parseFloat(newMemberForm.membershipCost) || 0),
+                  )}
+                </span>
+              </li>
+            </ul>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">
+              <button
+                type="button"
+                onClick={() => setShowPurchaseConfirmModal(false)}
+                disabled={Boolean(wizardSync)}
+                className="min-h-[44px] w-full sm:flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#1a1a1a] disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmPurchaseAndContinue()}
+                disabled={Boolean(wizardSync)}
+                className="min-h-[44px] w-full sm:flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {wizardSync ? (
+                  <Loader2 className="animate-spin" size={16} />
+                ) : null}
+                {wizardMember ? "Reintentar cobro" : "Confirmar pago"}
+              </button>
             </div>
           </div>
         </div>
