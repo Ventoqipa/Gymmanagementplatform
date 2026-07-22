@@ -15,7 +15,10 @@ export type Member = {
   phone: string;
   emergencyPhone?: string;
   address?: string;
+  /** Identificación: data URL local o URL `/docs-api/...` autenticada vía proxy. */
   idDocumentDataUrl?: string;
+  /** Nombre de archivo en DocsEG (path relativo). */
+  docFileName?: string;
   faceIdEnrolled?: boolean;
   faceIdTemplateId?: string;
   /** Cargo recurrente domiciliado en tarjeta/cuenta (catálogo isDirectDebit). */

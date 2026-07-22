@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import imgMemberProfile from "../../imports/PerfilDeMiembroGestion/3b634f4a9044fcdaee9556d934e90fbcffd448af.png";
+import { addClientUseCase, listClientsUseCase, updateClientUseCase, clientIdFromMemberId, sortMembersByDateAddedDesc, listBranchPricesUseCase, buildDirectPayPeriodOptions, buildDirectDebitPeriodOptions, findPeriodOption, resolveDocumentPreviewKind, type BranchPricePeriodOption, type CatalogBranchPrice } from "../core/catalog";
 import {
   Search,
   ChevronLeft,
@@ -23,8 +23,10 @@ import {
   Pencil,
   Check,
   CheckCircle2,
+  Download,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
-import { addClientUseCase, listClientsUseCase, updateClientUseCase, clientIdFromMemberId, sortMembersByDateAddedDesc, listBranchPricesUseCase, buildDirectPayPeriodOptions, buildDirectDebitPeriodOptions, findPeriodOption, type BranchPricePeriodOption, type CatalogBranchPrice } from "../core/catalog";
 import { getSessionPayer } from "../core/auth/authStorage";
 import {
   getSubscriptionPrice,
@@ -50,8 +52,173 @@ import { mockFaceIdEnroll } from "../lib/thirdPartyMocks";
 
 type ExpiryUrgency = "expired" | "critical" | "warning" | "notice" | "ok";
 
+/** Quita guiones/placeholders del API ("-", "--") y espacios sobrantes. */
+function cleanMemberNamePart(value: string | null | undefined): string {
+  return (value ?? "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function memberFullName(m: Pick<Member, "firstName" | "lastName">): string {
-  return `${m.firstName} ${m.lastName}`.trim();
+  return [cleanMemberNamePart(m.firstName), cleanMemberNamePart(m.lastName)]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
+function memberInitials(member: Pick<Member, "firstName" | "lastName">): string {
+  const first = cleanMemberNamePart(member.firstName);
+  const last = cleanMemberNamePart(member.lastName);
+  const parts = `${first} ${last}`.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) {
+    return (parts[0].slice(0, 2) || "?").toUpperCase();
+  }
+  const a = parts[0][0] ?? "";
+  const b = parts[parts.length - 1][0] ?? "";
+  return (a + b).toUpperCase() || "?";
+}
+
+function documentDownloadFileName(member: Member): string {
+  const base =
+    member.docFileName?.split("/").pop()?.trim() ||
+    `${memberFullName(member).replace(/\s+/g, "_") || member.id}_documento`;
+  if (/\.[a-z0-9]{2,8}$/i.test(base)) return base;
+  const fromUrl = resolveDocumentPreviewKind(
+    member.idDocumentDataUrl,
+    member.docFileName,
+  );
+  if (fromUrl === "pdf") return `${base}.pdf`;
+  if (fromUrl === "image") return `${base}.jpg`;
+  return base;
+}
+
+async function downloadMemberDocument(member: Member): Promise<void> {
+  const url = member.idDocumentDataUrl?.trim();
+  if (!url) {
+    toast.error("No hay documento para descargar.");
+    return;
+  }
+  const fileName = documentDownloadFileName(member);
+  try {
+    if (url.startsWith("data:")) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.rel = "noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch (error) {
+    toast.error("No se pudo descargar el documento", {
+      description:
+        error instanceof Error ? error.message : "Error al obtener el archivo.",
+    });
+  }
+}
+
+const MAX_DOCUMENT_BYTES = 12 * 1024 * 1024;
+
+function DocumentPreview({
+  src,
+  fileName,
+  alt,
+  maxHeightClass = "max-h-[280px]",
+}: {
+  src: string;
+  fileName?: string | null;
+  alt?: string;
+  maxHeightClass?: string;
+}) {
+  const kind = resolveDocumentPreviewKind(src, fileName);
+  const label =
+    fileName?.split("/").pop()?.trim() ||
+    (kind === "pdf" ? "Documento PDF" : kind === "image" ? "Imagen" : "Archivo");
+
+  if (kind === "image") {
+    return (
+      <a
+        href={src}
+        target="_blank"
+        rel="noreferrer"
+        className={`block rounded border border-[rgba(93,63,60,0.25)] overflow-hidden bg-[#0e0e0e] hover:border-[#e31e24]/50 transition-colors ${maxHeightClass}`}
+        title="Abrir en tamaño completo"
+      >
+        <img
+          src={src}
+          alt={alt ?? label}
+          className={`w-full h-auto object-contain ${maxHeightClass}`}
+        />
+      </a>
+    );
+  }
+
+  if (kind === "pdf") {
+    return (
+      <div className="space-y-2">
+        <div
+          className={`rounded border border-[rgba(93,63,60,0.25)] overflow-hidden bg-[#0e0e0e] ${maxHeightClass}`}
+        >
+          <iframe
+            src={src}
+            title={alt ?? label}
+            className={`w-full border-0 bg-white ${maxHeightClass}`}
+            style={{ minHeight: 220 }}
+          />
+        </div>
+        <a
+          href={src}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 text-[#808080] text-[10px] hover:text-[#e31e24] transition-colors"
+        >
+          <ExternalLink size={12} />
+          Abrir PDF en otra pestaña
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded border border-[rgba(93,63,60,0.25)] bg-[#0e0e0e] px-4 py-5 flex flex-col items-center justify-center gap-3 text-center">
+      <div className="w-12 h-12 rounded-full bg-[#131313] border border-[rgba(93,63,60,0.2)] flex items-center justify-center text-[#e31e24]">
+        <FileText size={22} />
+      </div>
+      <div className="min-w-0 max-w-full">
+        <p className="text-[#e5e2e1] text-[12px] font-bold truncate" title={label}>
+          {label}
+        </p>
+        <p className="text-[#5a5a5a] text-[10px] mt-1">
+          Vista previa no disponible para este tipo de archivo
+        </p>
+      </div>
+      <a
+        href={src}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-[#e5e2e1] hover:text-[#e31e24] transition-colors"
+      >
+        <ExternalLink size={12} />
+        Abrir archivo
+      </a>
+    </div>
+  );
 }
 
 function normalizePhoneDigits(phone: string): string {
@@ -148,12 +315,6 @@ function memberPlanLabel(tier: string): string | null {
 
 function getExpiryLevel(renewalDateIso: string): ExpiryUrgency {
   return getExpiryMeta(renewalDateIso).level;
-}
-
-function memberInitials(member: Pick<Member, "firstName" | "lastName">): string {
-  const a = member.firstName.trim()[0] ?? "";
-  const b = member.lastName.trim()[0] ?? "";
-  return (a + b).toUpperCase() || "?";
 }
 
 function expiryAvatarClass(level: ExpiryUrgency): string {
@@ -483,6 +644,7 @@ function memberToEditForm(member: Member) {
     enrollmentDate: member.enrollmentDate,
     renewalDate: member.renewalDate,
     idDocumentDataUrl: member.idDocumentDataUrl ?? null,
+    idDocumentFileName: member.docFileName ?? null,
   };
 }
 
@@ -519,6 +681,7 @@ const emptyNewMemberForm = () => {
     faceIdTerminal: "TRN-MAIN-01",
     address: "",
     idDocumentDataUrl: null as string | null,
+    idDocumentFileName: null as string | null,
   };
 };
 
@@ -812,7 +975,11 @@ export default function Members() {
       toast.error("La foto es demasiado grande; intenta menos zoom o mejor luz.");
       return;
     }
-    setNewMemberForm((f) => ({ ...f, idDocumentDataUrl: dataUrl }));
+    setNewMemberForm((f) => ({
+      ...f,
+      idDocumentDataUrl: dataUrl,
+      idDocumentFileName: `captura_${Date.now()}.jpg`,
+    }));
     toast.success("Foto capturada");
     setShowIdCameraModal(false);
     stopIdCameraStream();
@@ -822,22 +989,21 @@ export default function Members() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("El archivo debe ser una imagen (JPG, PNG, etc.).");
-      return;
-    }
-    const maxBytes = 6 * 1024 * 1024;
-    if (file.size > maxBytes) {
-      toast.error("La imagen debe pesar menos de 6 MB.");
+    if (file.size > MAX_DOCUMENT_BYTES) {
+      toast.error("El archivo debe pesar menos de 12 MB.");
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      setNewMemberForm((f) => ({ ...f, idDocumentDataUrl: dataUrl }));
-      toast.success("Identificación adjunta al expediente de alta.");
+      setNewMemberForm((f) => ({
+        ...f,
+        idDocumentDataUrl: dataUrl,
+        idDocumentFileName: file.name,
+      }));
+      toast.success("Documento adjunto al expediente de alta.");
     };
-    reader.onerror = () => toast.error("No se pudo leer la imagen.");
+    reader.onerror = () => toast.error("No se pudo leer el archivo.");
     reader.readAsDataURL(file);
   };
 
@@ -953,22 +1119,24 @@ export default function Members() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !memberEditForm) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("El archivo debe ser una imagen (JPG, PNG, etc.).");
-      return;
-    }
-    if (file.size > 6 * 1024 * 1024) {
-      toast.error("La imagen debe pesar menos de 6 MB.");
+    if (file.size > MAX_DOCUMENT_BYTES) {
+      toast.error("El archivo debe pesar menos de 12 MB.");
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       setMemberEditForm((f) =>
-        f ? { ...f, idDocumentDataUrl: reader.result as string } : f,
+        f
+          ? {
+              ...f,
+              idDocumentDataUrl: reader.result as string,
+              idDocumentFileName: file.name,
+            }
+          : f,
       );
       toast.success("Documento actualizado en el formulario.");
     };
-    reader.onerror = () => toast.error("No se pudo leer la imagen.");
+    reader.onerror = () => toast.error("No se pudo leer el archivo.");
     reader.readAsDataURL(file);
   };
 
@@ -1994,7 +2162,7 @@ export default function Members() {
                         </span>
                       ) : null}
                     </div>
-                    <div className="w-full grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6">
+                    <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
                       {/* Suscripción / vigencia */}
                       <div className="w-full min-w-0 bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-5 sm:p-6">
                         <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] mb-2">
@@ -2045,70 +2213,65 @@ export default function Members() {
                         </div>
                       </div>
 
-                      {/* Biometric Enrollment */}
-                      <div className="w-full min-w-0 bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-5 sm:p-6">
-                        <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] mb-4">
-                          SEC_ENROLLMENT
-                        </p>
-                        <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] aspect-square mb-4 flex items-center justify-center">
-                          <img
-                            src={imgMemberProfile}
-                            alt="Member Profile"
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-[10px]">
-                            <span className="text-[#808080]">FACE_ID_STATUS</span>
-                            <span
-                              className={`font-bold ${
-                                member.faceIdEnrolled === false
-                                  ? "text-[#ffa500]"
-                                  : "text-[#00ff00]"
-                              }`}
-                            >
-                              {member.faceIdEnrolled === false ? "PENDIENTE" : "ENROLLED"}
-                            </span>
-                          </div>
-                          {member.faceIdTemplateId && (
-                            <div className="flex justify-between text-[10px] gap-2">
-                              <span className="text-[#808080] shrink-0">TEMPLATE</span>
-                              <span className="text-[#393939] font-mono text-[9px] text-right break-all">
-                                {member.faceIdTemplateId}
+                      {/* Face ID + estadísticas */}
+                      <div className="w-full min-w-0 grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6">
+                        <div className="w-full min-w-0 bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-5 sm:p-6 flex flex-col">
+                          <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] mb-4 inline-flex items-center gap-2">
+                            <ScanFace size={14} />
+                            SEC_ENROLLMENT
+                          </p>
+                          <div className="flex-1 flex flex-col justify-center space-y-3">
+                            <div className="flex items-center justify-between gap-3 rounded border border-[rgba(93,63,60,0.12)] bg-[#0e0e0e] px-3 py-2.5">
+                              <span className="text-[#808080] text-[10px]">FACE_ID_STATUS</span>
+                              <span
+                                className={`text-[11px] font-bold ${
+                                  member.faceIdEnrolled === false
+                                    ? "text-[#ffa500]"
+                                    : "text-[#00ff00]"
+                                }`}
+                              >
+                                {member.faceIdEnrolled === false ? "PENDIENTE" : "ENROLLED"}
                               </span>
                             </div>
-                          )}
-                          <div className="flex justify-between text-[10px]">
-                            <span className="text-[#808080]">ÚLT_SYNC</span>
-                            <span className="text-[#e5e2e1] font-bold">
-                              {member.faceIdEnrolled === false ? "—" : "Activo"}
-                            </span>
+                            {member.faceIdTemplateId ? (
+                              <div className="rounded border border-[rgba(93,63,60,0.12)] bg-[#0e0e0e] px-3 py-2.5">
+                                <p className="text-[#808080] text-[10px] mb-1">TEMPLATE</p>
+                                <p className="text-[#a8a4a3] font-mono text-[9px] break-all leading-relaxed">
+                                  {member.faceIdTemplateId}
+                                </p>
+                              </div>
+                            ) : null}
+                            <div className="flex items-center justify-between gap-3 rounded border border-[rgba(93,63,60,0.12)] bg-[#0e0e0e] px-3 py-2.5">
+                              <span className="text-[#808080] text-[10px]">ÚLT_SYNC</span>
+                              <span className="text-[#e5e2e1] text-[11px] font-bold">
+                                {member.faceIdEnrolled === false ? "—" : "Activo"}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      {/* Estadísticas de actividad */}
-                      <div className="w-full min-w-0 bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-5 sm:p-6 md:col-span-2 xl:col-span-1">
-                        <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
-                          Estadísticas de actividad
-                        </p>
-                        <div className="space-y-4">
-                          <div>
-                            <p className="text-[#808080] text-[10px] mb-1">Visitas del mes</p>
-                            <p className="text-[#e5e2e1] text-[16px] font-black">{member.monthlyVisits}</p>
-                          </div>
-                          <div>
-                            <p className="text-[#808080] text-[10px] mb-1">Tiempo promedio de sesión</p>
-                            <p className="text-[#e5e2e1] text-[16px] font-black">{member.avgSessionTime} min</p>
-                          </div>
-                          <div>
-                            <p className="text-[#808080] text-[10px] mb-1">Miembro desde</p>
-                            <p className="text-[#e5e2e1] text-[14px] font-black">
-                              {new Date(member.enrollmentDate).toLocaleDateString("es-MX", {
-                                year: "numeric",
-                                month: "short",
-                              })}
-                            </p>
+                        <div className="w-full min-w-0 bg-[#2a2a2a] border border-[rgba(93,63,60,0.05)] p-5 sm:p-6">
+                          <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase mb-4">
+                            Estadísticas de actividad
+                          </p>
+                          <div className="space-y-4">
+                            <div>
+                              <p className="text-[#808080] text-[10px] mb-1">Visitas del mes</p>
+                              <p className="text-[#e5e2e1] text-[16px] font-black">{member.monthlyVisits}</p>
+                            </div>
+                            <div>
+                              <p className="text-[#808080] text-[10px] mb-1">Tiempo promedio de sesión</p>
+                              <p className="text-[#e5e2e1] text-[16px] font-black">{member.avgSessionTime} min</p>
+                            </div>
+                            <div>
+                              <p className="text-[#808080] text-[10px] mb-1">Miembro desde</p>
+                              <p className="text-[#e5e2e1] text-[14px] font-black">
+                                {new Date(member.enrollmentDate).toLocaleDateString("es-MX", {
+                                  year: "numeric",
+                                  month: "short",
+                                })}
+                              </p>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -2253,35 +2416,53 @@ export default function Members() {
                             </p>
                             {memberEditForm.idDocumentDataUrl ? (
                               <div className="space-y-3">
-                                <a
-                                  href={memberEditForm.idDocumentDataUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="block rounded border border-[rgba(93,63,60,0.25)] overflow-hidden bg-[#0e0e0e] hover:border-[#e31e24]/50 transition-colors"
-                                >
-                                  <img
-                                    src={memberEditForm.idDocumentDataUrl}
-                                    alt={`Identificación ${member.id}`}
-                                    className="w-full max-h-[280px] object-contain"
-                                  />
-                                </a>
+                                <DocumentPreview
+                                  src={memberEditForm.idDocumentDataUrl}
+                                  fileName={
+                                    memberEditForm.idDocumentFileName ??
+                                    member.docFileName
+                                  }
+                                  alt={`Documento ${member.id}`}
+                                  maxHeightClass="max-h-[280px]"
+                                />
                                 <p className="text-[#808080] text-[10px]">
-                                  Identificación oficial · clic para abrir en tamaño completo
+                                  {memberEditForm.idDocumentFileName
+                                    ? memberEditForm.idDocumentFileName
+                                    : "Documento del expediente"}
                                 </p>
                               </div>
                             ) : (
                               <p className="text-[#5a5a5a] text-[12px] mb-3">
-                                No hay documentos en el expediente. Sube una identificación.
+                                No hay documentos en el expediente. Sube una identificación u otro archivo.
                               </p>
                             )}
                             <input
                               ref={memberEditFileRef}
                               type="file"
-                              accept="image/*"
                               className="hidden"
                               onChange={handleMemberEditDocument}
                             />
                             <div className="flex flex-wrap gap-2 mt-2">
+                              {memberEditForm.idDocumentDataUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void downloadMemberDocument({
+                                      ...member,
+                                      idDocumentDataUrl:
+                                        memberEditForm.idDocumentDataUrl ??
+                                        member.idDocumentDataUrl,
+                                      docFileName:
+                                        memberEditForm.idDocumentFileName ??
+                                        member.docFileName,
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-2 bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] px-4 py-2 text-[10px] font-bold uppercase tracking-wide hover:border-[#e31e24] transition-colors"
+                                >
+                                  <Download size={14} />
+                                  Descargar
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => memberEditFileRef.current?.click()}
@@ -2295,7 +2476,13 @@ export default function Members() {
                                   type="button"
                                   onClick={() =>
                                     setMemberEditForm((f) =>
-                                      f ? { ...f, idDocumentDataUrl: null } : f,
+                                      f
+                                        ? {
+                                            ...f,
+                                            idDocumentDataUrl: null,
+                                            idDocumentFileName: null,
+                                          }
+                                        : f,
                                     )
                                   }
                                   className="text-[#808080] hover:text-[#e31e24] text-[10px] font-bold uppercase tracking-wide px-2"
@@ -3024,12 +3211,11 @@ export default function Members() {
                       <span className="font-normal normal-case text-[#5a5a5a]">(opcional)</span>
                     </p>
                     <p className="mt-2 text-[#5a5a5a] text-[9px] leading-relaxed">
-                      Puedes adjuntarla después. Importa archivo o toma foto con la cámara.
+                      Opcional. Cualquier archivo (imagen, PDF, Word, etc., máx. 12 MB) o foto con la cámara.
                     </p>
                     <input
                       ref={idFileInputRef}
                       type="file"
-                      accept="image/*"
                       className="hidden"
                       onChange={handleIdDocumentFile}
                     />
@@ -3054,7 +3240,11 @@ export default function Members() {
                         <button
                           type="button"
                           onClick={() =>
-                            setNewMemberForm((f) => ({ ...f, idDocumentDataUrl: null }))
+                            setNewMemberForm((f) => ({
+                              ...f,
+                              idDocumentDataUrl: null,
+                              idDocumentFileName: null,
+                            }))
                           }
                           className="inline-flex items-center gap-2 px-3 py-2 text-[10px] font-bold uppercase text-[#808080] hover:text-[#e31e24]"
                         >
@@ -3063,12 +3253,18 @@ export default function Members() {
                       ) : null}
                     </div>
                     {newMemberForm.idDocumentDataUrl ? (
-                      <div className="mt-3 max-h-[180px] overflow-hidden rounded border border-[rgba(93,63,60,0.2)] bg-[#131313]">
-                        <img
+                      <div className="mt-3">
+                        <DocumentPreview
                           src={newMemberForm.idDocumentDataUrl}
-                          alt="Vista previa identificación"
-                          className="w-full h-auto max-h-[180px] object-contain"
+                          fileName={newMemberForm.idDocumentFileName}
+                          alt="Vista previa del documento"
+                          maxHeightClass="max-h-[180px]"
                         />
+                        {newMemberForm.idDocumentFileName ? (
+                          <p className="mt-2 text-[#808080] text-[10px] truncate">
+                            {newMemberForm.idDocumentFileName}
+                          </p>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>

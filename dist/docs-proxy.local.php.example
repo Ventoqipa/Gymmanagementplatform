@@ -1,0 +1,10 @@
+<?php
+/**
+ * Copia a docs-proxy.local.php en el servidor (no versionar).
+ * Alternativa a variables de entorno DOCS_* en el hosting.
+ */
+return [
+    'target' => 'https://docs.tanosi.com.mx',
+    'username' => 'DocsEG',
+    'password' => '#D0cEG2026#',
+];

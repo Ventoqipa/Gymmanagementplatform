@@ -39,4 +39,16 @@ export {
 } from "./mappers/branchPriceMapper";
 
 export { buildClientPayload } from "./clientApi";
-export { buildPhotoClientIdFileName, dataUrlToBase64 } from "./utils/clientPhoto";
+export {
+  buildPhotoClientIdFileName,
+  dataUrlToBase64,
+  dataUrlToExtension,
+  mimeFromDataUrl,
+  resolveDocumentPreviewKind,
+  extensionFromFileName,
+  type DocumentPreviewKind,
+} from "./utils/clientPhoto";
+export {
+  buildClientDocumentUrl,
+  normalizeDocFileName,
+} from "./utils/clientDocUrl";

@@ -1,5 +1,6 @@
 import type { Member } from "../../../lib/membersStore";
 import type { CatalogClient } from "../types";
+import { buildClientDocumentUrl } from "../utils/clientDocUrl";
 import { decodeEmergencyPhone } from "../utils/emergencyPhone";
 
 function isoDatePart(value?: string | null): string {
@@ -31,14 +32,31 @@ function readEmergencyPhone(client: CatalogClient): string | undefined {
 }
 
 function readDocDataUrl(client: CatalogClient): string | undefined {
+  // Preferir archivo en DocsEG (DocFileName → URL autenticada vía proxy).
+  const fromFile = buildClientDocumentUrl(client.DocFileName);
+  if (fromFile) return fromFile;
+
   const b64 = client.DocBase64?.trim();
   if (!b64 || b64 === "-") return undefined;
-  const ext = (client.DocExtensionName ?? "").toLowerCase();
-  const mime = ext.includes("png")
-    ? "image/png"
-    : ext.includes("jpg") || ext.includes("jpeg")
-      ? "image/jpeg"
-      : "image/png";
+  const ext = (client.DocExtensionName ?? "").toLowerCase().replace(/^\./, "");
+  const mime =
+    ext === "png"
+      ? "image/png"
+      : ext === "jpg" || ext === "jpeg"
+        ? "image/jpeg"
+        : ext === "gif"
+          ? "image/gif"
+          : ext === "webp"
+            ? "image/webp"
+            : ext === "pdf"
+              ? "application/pdf"
+              : ext === "doc"
+                ? "application/msword"
+                : ext === "docx"
+                  ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  : ext
+                    ? `application/${ext}`
+                    : "application/octet-stream";
   return `data:${mime};base64,${b64}`;
 }
 
@@ -65,8 +83,17 @@ export function clientToMember(
 ): Member {
   let firstName = client.firstName?.trim() || "";
   let lastName = client.lastName?.trim() || "";
+  if (firstName === "-") firstName = "";
+  if (lastName === "-") lastName = "";
+  // Quita guiones sueltos que el API mete como placeholder.
+  firstName = firstName.replace(/-/g, " ").replace(/\s+/g, " ").trim();
+  lastName = lastName.replace(/-/g, " ").replace(/\s+/g, " ").trim();
   if (!firstName && client.fullName?.trim()) {
-    const parts = client.fullName.trim().split(/\s+/).filter(Boolean);
+    const cleanedFull = client.fullName
+      .replace(/-/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const parts = cleanedFull.split(/\s+/).filter(Boolean);
     firstName = parts[0] ?? "—";
     lastName = parts.slice(1).join(" ");
   }
@@ -92,6 +119,9 @@ export function clientToMember(
         : "";
 
   const faceId = client.faceID?.trim();
+  const docFileName = client.DocFileName?.trim();
+  const normalizedFile =
+    docFileName && docFileName !== "-" ? docFileName : undefined;
 
   return {
     id: memberIdFromClient(client),
@@ -110,6 +140,7 @@ export function clientToMember(
     emergencyPhone: readEmergencyPhone(client),
     address,
     idDocumentDataUrl: readDocDataUrl(client),
+    docFileName: normalizedFile,
     faceIdEnrolled: faceId ? true : undefined,
     faceIdTemplateId: faceId || undefined,
     isDirectDebit: client.isDirectDebit === true ? true : undefined,

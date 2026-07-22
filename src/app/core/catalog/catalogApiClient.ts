@@ -31,21 +31,40 @@ export type CatalogRequestOptions = {
   body?: unknown;
 };
 
+/**
+ * IIS/Neubox (StaticFile/WebDAV) suele responder 405 a PUT/DELETE.
+ * En esas rutas usamos POST + X-HTTP-Method-Override; el proxy PHP
+ * reenvía el verbo real al API Tanosi.
+ */
+function resolveCatalogFetch(
+  method: CatalogRequestOptions["method"],
+): { fetchMethod: "GET" | "POST"; override?: "PUT" | "DELETE" } {
+  if (method === "PUT" || method === "DELETE") {
+    return { fetchMethod: "POST", override: method };
+  }
+  return { fetchMethod: method };
+}
+
 export async function catalogRequest<T>(options: CatalogRequestOptions): Promise<T> {
   const token = getAuthToken();
   if (!token?.trim()) {
     throw new CatalogApiError("No hay sesión activa. Inicie sesión nuevamente.", 401);
   }
 
+  const { fetchMethod, override } = resolveCatalogFetch(options.method);
+
   const headers: Record<string, string> = {
     Accept: "*/*",
     Authorization: `Bearer ${token.trim()}`,
   };
+  if (override) {
+    headers["X-HTTP-Method-Override"] = override;
+  }
 
   let response: Response;
   try {
     response = await fetch(options.url, {
-      method: options.method,
+      method: fetchMethod,
       headers:
         options.body !== undefined
           ? { ...headers, "Content-Type": "application/json" }

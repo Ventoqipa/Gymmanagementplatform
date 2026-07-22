@@ -25,6 +25,14 @@ export default defineConfig(({ mode }) => {
     env.VITE_POS_API_PROXY_TARGET ?? 'https://elitegym247.pos.tanosi.com.mx'
   const catalogProxyTarget =
     env.VITE_CATALOG_API_PROXY_TARGET ?? 'https://apicatalogsegtest.tanosi.com.mx'
+  const docsProxyTarget =
+    env.DOCS_PROXY_TARGET ?? 'https://docs.tanosi.com.mx'
+  const docsUsername = env.DOCS_USERNAME ?? ''
+  const docsPassword = env.DOCS_PASSWORD ?? ''
+  const docsBasicAuth =
+    docsUsername && docsPassword
+      ? `Basic ${Buffer.from(`${docsUsername}:${docsPassword}`).toString('base64')}`
+      : ''
 
   return {
     plugins: [
@@ -63,6 +71,23 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
           rewrite: (p) => p.replace(/^\/catalog-api/, ''),
+        },
+        /**
+         * Documentos/imágenes autenticados (DocsEG).
+         * Credenciales solo en .env (DOCS_USERNAME / DOCS_PASSWORD), no en VITE_*.
+         */
+        '/docs-api': {
+          target: docsProxyTarget,
+          changeOrigin: true,
+          secure: false,
+          rewrite: (p) => p.replace(/^\/docs-api/, ''),
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq) => {
+              if (docsBasicAuth) {
+                proxyReq.setHeader('Authorization', docsBasicAuth)
+              }
+            })
+          },
         },
       },
     },
