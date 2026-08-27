@@ -40,6 +40,10 @@ export type CatalogClientWritePayload = {
   priceSubscription?: number;
   /** Frecuencia de precio en sucursal. */
   priceBranchFrequencyID?: number;
+  /** Plantilla Face ID en ZKTeco / Gateway. */
+  faceID?: string | null;
+  /** PIN / usuario en dispositivo biométrico. */
+  memberID?: string | null;
 };
 
 /** Respuesta GET / listado (acepta nombres legacy y actuales). */
@@ -111,6 +115,10 @@ export type AddClientInput = {
   priceSubscription?: number;
   /** Frecuencia de precio en sucursal. Por defecto 1. */
   priceBranchFrequencyID?: number;
+  /** Plantilla Face ID (post-enroll Gateway). */
+  faceID?: string | null;
+  /** PIN / usuario en dispositivo biométrico. */
+  memberID?: string | null;
 };
 
 export type UpdateClientInput = AddClientInput & {

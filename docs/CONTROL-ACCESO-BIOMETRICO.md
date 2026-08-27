@@ -3,7 +3,7 @@
 Documento de referencia para **Elite Gym 24/7**: cómo controlar dispositivos ZKTeco, validar vigencia de membresía y operar torniquetes. Combina el hallazgo de campo (PDFs de discovery) con el diseño de la plataforma web y el trabajo pendiente de integración real.
 
 **Última actualización:** junio 2026  
-**Relacionado:** `README-FUNCIONALIDAD.md`, `README-TECNICO.md`, `docs/INTEGRACION-TORNIQUETE.md`, `src/app/lib/thirdPartyMocks.ts`
+# Relacionado: `README-FUNCIONALIDAD.md`, `README-TECNICO.md`, `docs/INTEGRACION-TORNIQUETE.md`, `docs/CONTRATO-ACCESS-GATEWAY.md`, `src/app/lib/thirdPartyMocks.ts`
 
 > **Torniquete:** integración física pendiente. Ver [INTEGRACION-TORNIQUETE.md](./INTEGRACION-TORNIQUETE.md) para contrato, checklist y sustitución de mocks.
 
@@ -292,33 +292,45 @@ sequenceDiagram
 
 ### Contrato HTTP previsto (ya tipado)
 
+Documento canónico: [CONTRATO-ACCESS-GATEWAY.md](./CONTRATO-ACCESS-GATEWAY.md)
+
 **`POST /v1/biometric/enroll`**
 
 ```typescript
 // Request
 {
-  terminalId: string;
-  memberId: string;      // "CLI-{clientID}"
+  terminalId: string;       // TRN-MAIN-01 | TRN-MAIN-02
+  memberId: string;         // "CLI-{clientID}"
   displayName?: string;
+  clientId?: number;
+  pin?: string;             // default String(clientId)
+  timeoutSeconds?: number;  // default 120
 }
 
-// Response
+// Response 200
 {
-  templateId: string;
+  ok: true;
+  templateId: string;       // → Catálogo faceID
   vendorRequestId: string;
-  qualityScore: number;  // 0–1, mínimo sugerido ≥ 0.85
+  qualityScore: number;     // 0–1, mínimo ≥ 0.85
   latencyMs: number;
+  terminalId: string;
+  deviceSerial?: string;
+  pin?: string;
+  enrolledAtIso?: string;
 }
 ```
+
+Código: `src/app/core/accessGateway/` (`enrollFaceId`).
 
 ### Puntos de enrolamiento en la UI actual
 
 | Pantalla | Comportamiento hoy |
 |----------|-------------------|
-| **Members → Nuevo miembro** | Checkbox “Dar de alta en FaceID” → `mockFaceIdEnroll` tras `Client/Add` |
-| **Access Control → Alta biométrica** | Enrolamiento manual por `memberId` + terminal |
+| **Members → Nuevo miembro** | Paso 3 → `enrollFaceId` → `persistFaceIdUseCase` (`faceID`) |
+| **Access Control → Alta biométrica** | Mismo `enrollFaceId` + sync catálogo si hay ficha local `CLI-*` |
 
-Tras integración real, ambos deben llamar al **mismo endpoint** del Access Gateway.
+Sin `VITE_ACCESS_GATEWAY_URL` (ni override `localStorage`) → mock. Con URL → Gateway. Guía: [PRUEBA-ENROLAMIENTO-ANYDESK.md](./PRUEBA-ENROLAMIENTO-ANYDESK.md).
 
 ### Campos catálogo a actualizar tras enrolar
 
@@ -344,14 +356,16 @@ Sin este paso, el catálogo tendría `faceID` pero el lector no reconocería al 
 
 ## 6. Mapa de dispositivos y terminales
 
-Inventario sugerido (completar en implementación):
+Inventario confirmado en sitio (PanelZKTeco, ago 2026):
 
-| ID lógico (app) | Serial ZKTeco | Ubicación | IP LAN | Salida torniquete |
-|-----------------|---------------|-----------|--------|-------------------|
-| `TRN-MAIN-01` | (pendiente) | Entrada principal | (pendiente) | Wiegand 26 |
-| `TRN-MAIN-02` | (pendiente) | Entrada lateral | (pendiente) | Wiegand 26 |
+| ID lógico (app) | Serial ZKTeco | Modelo | Ubicación | Salida torniquete |
+|-----------------|---------------|--------|-----------|-------------------|
+| `TRN-MAIN-01` | `SYZ8244300163` | SpeedFace-V5L | Entrada principal* | Wiegand 26 |
+| `TRN-MAIN-02` | `SYZ8244300350` | SpeedFace-V5L | Entrada lateral* | Wiegand 26 |
 
-La app usa `TRN-MAIN-01` / `TRN-MAIN-02` como placeholders en `demoStore.ts` y `AccessControl.tsx`.
+\*Confirmar en sitio cuál SN es principal vs lateral. Servidor ADMS: `192.168.1.22`.
+
+La app usa `TRN-MAIN-01` / `TRN-MAIN-02` en `demoStore.ts`, `AccessControl.tsx` y `ACCESS_TERMINALS`.
 
 ---
 
@@ -368,11 +382,13 @@ La app usa `TRN-MAIN-01` / `TRN-MAIN-02` como placeholders en `demoStore.ts` y `
 
 ### Fase B — Enrolamiento
 
-- [ ] `POST /v1/biometric/enroll` en Gateway.
-- [ ] Sincronizar plantilla a terminal(s).
-- [ ] `PUT Client/Update` con `faceID`.
-- [ ] Conectar Members y Access Control al Gateway (quitar mocks).
-
+- [x] Contrato `POST /v1/biometric/enroll` documentado ([CONTRATO-ACCESS-GATEWAY.md](./CONTRATO-ACCESS-GATEWAY.md)).
+- [x] Cliente Elite `enrollFaceId` + persistencia `faceID` en Catálogo (Members / Access Control).
+- [x] Reintento solo Catálogo si enroll OK y Update falla.
+- [x] Stub Gateway LAN para pruebas ([PRUEBA-ENROLAMIENTO-ANYDESK.md](./PRUEBA-ENROLAMIENTO-ANYDESK.md)).
+- [ ] `POST /v1/biometric/enroll` real en Gateway (ADMS → SpeedFace).
+- [ ] Sincronizar plantilla a terminal(es).
+- [ ] Quitar dependencia del stub en producción.
 ### Fase C — Operación y reportes
 
 - [ ] Persistir `AccessLogEntry` en BD.

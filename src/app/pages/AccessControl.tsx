@@ -20,10 +20,12 @@ import {
   updateTurnstile,
   type AccessEnrollmentRecord,
 } from "../lib/demoStore";
-import { mockFaceIdEnroll, mockFaceIdVerify, mockTurnstileCommand } from "../lib/thirdPartyMocks";
+import { AccessGatewayError, enrollFaceId } from "../core/accessGateway";
+import { clientIdFromMemberId, persistFaceIdUseCase } from "../core/catalog";
+import { mockFaceIdVerify, mockTurnstileCommand } from "../lib/thirdPartyMocks";
+import { loadMembers, saveMembers } from "../lib/membersStore";
 import type { AccessLogEntry } from "../lib/demoStore";
 import { buildUnknownCaptureDataUrl } from "../lib/accessCaptureImage";
-
 type EnrollPhase = "idle" | "capturing" | "registering";
 
 export default function AccessControl() {
@@ -140,18 +142,20 @@ export default function AccessControl() {
   const runEnrollment = async () => {
     const mid = enrollMemberId.trim().toUpperCase();
     if (!mid) {
-      toast.error("Indique el ID de miembro.", { description: "Ejemplo: MEM-1247" });
+      toast.error("Indique el ID de miembro.", { description: "Ejemplo: CLI-123" });
       return;
     }
     setEnrollBusy(true);
     setEnrollPhase("capturing");
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 400));
     setEnrollPhase("registering");
     try {
-      const res = await mockFaceIdEnroll({
+      const clientId = clientIdFromMemberId(mid) ?? undefined;
+      const res = await enrollFaceId({
         terminalId: enrollTerminal,
         memberId: mid,
         displayName: enrollName.trim() || undefined,
+        clientId,
       });
       const display = enrollName.trim() || mid;
       const rec = appendAccessEnrollment({
@@ -162,13 +166,45 @@ export default function AccessControl() {
         qualityScore: res.qualityScore,
       });
       setRecentEnrollments((prev) => [rec, ...prev].slice(0, 12));
+
+      // Persistir faceID en Catálogo si el ID es CLI-{n} y hay ficha local.
+      if (clientId) {
+        const local = loadMembers().find((m) => m.id.toUpperCase() === mid);
+        if (local) {
+          const catalog = await persistFaceIdUseCase({
+            member: local,
+            templateId: res.templateId,
+            pin: res.pin,
+          });
+          if (catalog.ok) {
+            const next = loadMembers().map((m) =>
+              m.id.toUpperCase() === mid
+                ? {
+                    ...catalog.member,
+                    faceIdTemplateId: res.templateId,
+                    faceIdEnrolled: true,
+                  }
+                : m,
+            );
+            saveMembers(next);
+          } else {
+            toast.warning("Enrolado en Gateway; falta faceID en catálogo", {
+              description: catalog.message,
+              duration: 10_000,
+            });
+          }
+        }
+      }
+
       toast.success("Rostro registrado", {
         description: `${display} · Calidad ${(res.qualityScore * 100).toFixed(1)}%`,
       });
-    } catch {
-      toast.error("No se pudo completar el registro", {
-        description: "Compruebe la conexión del lector e intente de nuevo.",
-      });
+    } catch (error) {
+      const detail =
+        error instanceof AccessGatewayError
+          ? `${error.code}: ${error.message}`
+          : "Compruebe la conexión del lector e intente de nuevo.";
+      toast.error("No se pudo completar el registro", { description: detail });
     } finally {
       setEnrollPhase("idle");
       setEnrollBusy(false);

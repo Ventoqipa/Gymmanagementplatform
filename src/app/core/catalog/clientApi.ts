@@ -133,6 +133,13 @@ export function buildClientPayload(
     isPromotionalSubscription: Boolean(input.isPromotionalSubscription),
     priceSubscription: Math.max(0, input.priceSubscription ?? 200),
     priceBranchFrequencyID: Math.max(1, input.priceBranchFrequencyID ?? 1),
+
+    ...(input.faceID != null && String(input.faceID).trim()
+      ? { faceID: String(input.faceID).trim() }
+      : {}),
+    ...(input.memberID != null && String(input.memberID).trim()
+      ? { memberID: String(input.memberID).trim() }
+      : {}),
   };
 }
 

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { addClientUseCase, listClientsUseCase, updateClientUseCase, clientIdFromMemberId, sortMembersByDateAddedDesc, listBranchPricesUseCase, buildDirectPayPeriodOptions, buildDirectDebitPeriodOptions, findPeriodOption, resolveDocumentPreviewKind, type BranchPricePeriodOption, type CatalogBranchPrice } from "../core/catalog";
+import { addClientUseCase, listClientsUseCase, updateClientUseCase, persistFaceIdUseCase, clientIdFromMemberId, sortMembersByDateAddedDesc, listBranchPricesUseCase, buildDirectPayPeriodOptions, buildDirectDebitPeriodOptions, findPeriodOption, resolveDocumentPreviewKind, type BranchPricePeriodOption, type CatalogBranchPrice } from "../core/catalog";
+import { AccessGatewayError, enrollFaceId, isAccessGatewayConfigured } from "../core/accessGateway";
 import {
   Search,
   ChevronLeft,
@@ -48,8 +49,6 @@ import {
   saveMembers,
   type Member,
 } from "../lib/membersStore";
-import { mockFaceIdEnroll } from "../lib/thirdPartyMocks";
-
 type ExpiryUrgency = "expired" | "critical" | "warning" | "notice" | "ok";
 
 /** Quita guiones/placeholders del API ("-", "--") y espacios sobrantes. */
@@ -706,8 +705,13 @@ export default function Members() {
   const [wizardMember, setWizardMember] = useState<Member | null>(null);
   const [wizardPaymentDone, setWizardPaymentDone] = useState(false);
   const [wizardSync, setWizardSync] = useState<
-    null | "client" | "payment" | "faceid"
+    null | "client" | "payment" | "faceid" | "faceid-catalog"
   >(null);
+  /** Enroll OK pero falló PUT faceID — reintentar sin re-capturar. */
+  const [pendingFaceIdCatalog, setPendingFaceIdCatalog] = useState<{
+    templateId: string;
+    pin?: string;
+  } | null>(null);
   const [branchPrices, setBranchPrices] = useState<CatalogBranchPrice[]>([]);
   const [branchPricesLoading, setBranchPricesLoading] = useState(false);
   const [newMemberForm, setNewMemberForm] = useState(emptyNewMemberForm());
@@ -1396,6 +1400,7 @@ export default function Members() {
     setWizardMember(null);
     setWizardPaymentDone(false);
     setWizardSync(null);
+    setPendingFaceIdCatalog(null);
     setBranchPrices([]);
     setBranchPricesLoading(false);
     setStep1Errors({});
@@ -1410,6 +1415,7 @@ export default function Members() {
     setWizardMember(null);
     setWizardPaymentDone(false);
     setWizardSync(null);
+    setPendingFaceIdCatalog(null);
     setStep1Errors({});
     setShowPurchaseConfirmModal(false);
     setShowAddMemberModal(true);
@@ -1790,40 +1796,10 @@ export default function Members() {
     setAddMemberStep(3);
   };
 
-  /** Paso 3: Face ID (opcional). */
-  const completeFaceIdStep = async (opts: { enrollFaceId: boolean }) => {
-    if (!wizardMember) {
-      toast.error("No hay miembro creado. Regresa al paso 1.");
-      setAddMemberStep(1);
-      return;
-    }
-
-    let row = wizardMember;
+  /** Paso 3: Face ID (opcional) → Gateway + persist faceID en Catálogo. */
+  const finishWizardAfterFaceId = (row: Member) => {
     const fullName = memberFullName(row);
-
-    if (opts.enrollFaceId) {
-      setWizardSync("faceid");
-      try {
-        const res = await mockFaceIdEnroll({
-          terminalId: newMemberForm.faceIdTerminal,
-          memberId: row.id,
-          displayName: fullName,
-        });
-        row = {
-          ...row,
-          faceIdTemplateId: res.templateId,
-          faceIdEnrolled: true,
-        };
-      } catch {
-        toast.warning("No se vinculó el rostro", {
-          description:
-            "Complete el alta FaceID desde Control de acceso cuando el lector esté disponible.",
-        });
-      } finally {
-        setWizardSync(null);
-      }
-    }
-
+    setPendingFaceIdCatalog(null);
     setWizardMember(row);
     setMembers((prev) => {
       const next = prev.map((m) => (m.id === row.id ? row : m));
@@ -1843,7 +1819,7 @@ export default function Members() {
               : 0,
             membershipAmount: parseFloat(newMemberForm.membershipCost) || 0,
             directDebit: newMemberForm.directDebit,
-          }
+          },
     );
     setFilterExpiry("ALL");
     setSearchTerm("");
@@ -1851,6 +1827,107 @@ export default function Members() {
     toast.success("Alta completada", {
       description: `${fullName} · ${row.id}`,
     });
+  };
+
+  const syncFaceIdToCatalog = async (
+    row: Member,
+    templateId: string,
+    pin?: string,
+  ): Promise<Member | null> => {
+    setWizardSync("faceid-catalog");
+    try {
+      const catalog = await persistFaceIdUseCase({
+        member: row,
+        templateId,
+        pin,
+      });
+      if (!catalog.ok) {
+        setPendingFaceIdCatalog({ templateId, pin });
+        toast.warning("Face ID capturado; falta guardar en catálogo", {
+          description: `${catalog.message} Reintenta: no se vuelve a capturar el rostro.`,
+          duration: 12_000,
+        });
+        return null;
+      }
+      return {
+        ...catalog.member,
+        faceIdTemplateId: templateId,
+        faceIdEnrolled: true,
+        phone: row.phone,
+        address: row.address ?? catalog.member.address,
+        idDocumentDataUrl:
+          row.idDocumentDataUrl ?? catalog.member.idDocumentDataUrl,
+      };
+    } finally {
+      setWizardSync(null);
+    }
+  };
+
+  const completeFaceIdStep = async (opts: {
+    enrollFaceId: boolean;
+    /** Solo reintentar PUT faceID (enroll ya OK). */
+    retryCatalogOnly?: boolean;
+  }) => {
+    if (!wizardMember) {
+      toast.error("No hay miembro creado. Regresa al paso 1.");
+      setAddMemberStep(1);
+      return;
+    }
+
+    let row = wizardMember;
+    const fullName = memberFullName(row);
+
+    if (opts.retryCatalogOnly && pendingFaceIdCatalog) {
+      const synced = await syncFaceIdToCatalog(
+        row,
+        pendingFaceIdCatalog.templateId,
+        pendingFaceIdCatalog.pin,
+      );
+      if (!synced) return;
+      finishWizardAfterFaceId(synced);
+      return;
+    }
+
+    if (opts.enrollFaceId) {
+      setWizardSync("faceid");
+      try {
+        const clientId = clientIdFromMemberId(row.id) ?? undefined;
+        const res = await enrollFaceId({
+          terminalId: newMemberForm.faceIdTerminal,
+          memberId: row.id,
+          displayName: fullName,
+          clientId,
+        });
+        row = {
+          ...row,
+          faceIdTemplateId: res.templateId,
+          faceIdEnrolled: true,
+        };
+        setWizardMember(row);
+        setWizardSync(null);
+
+        const synced = await syncFaceIdToCatalog(row, res.templateId, res.pin);
+        if (!synced) return;
+        finishWizardAfterFaceId(synced);
+        return;
+      } catch (error) {
+        const detail =
+          error instanceof AccessGatewayError
+            ? `${error.code}: ${error.message}`
+            : error instanceof Error
+              ? error.message
+              : "Complete el alta FaceID desde Control de acceso cuando el lector esté disponible.";
+        toast.error("No se vinculó el rostro", {
+          description: detail,
+          duration: 10_000,
+        });
+        return;
+      } finally {
+        setWizardSync(null);
+      }
+    }
+
+    finishWizardAfterFaceId(row);
   };
 
   return (
@@ -2886,7 +2963,8 @@ export default function Members() {
                   <p className="text-[#e5e2e1] text-[12px] font-bold tracking-[1.5px] uppercase text-center">
                     {wizardSync === "client" && "Sincronizando cliente…"}
                     {wizardSync === "payment" && "Sincronizando cobro…"}
-                    {wizardSync === "faceid" && "Sincronizando Face ID…"}
+                    {wizardSync === "faceid" && "Enrolando Face ID…"}
+                    {wizardSync === "faceid-catalog" && "Guardando faceID en catálogo…"}
                   </p>
                 </div>
               ) : null}
@@ -3762,9 +3840,20 @@ export default function Members() {
                         <p className="text-[#808080] text-[11px] mt-2 leading-relaxed">
                           Puedes registrar el rostro ahora o omitir este paso y completarlo después
                           desde Control de acceso.
+                          {isAccessGatewayConfigured()
+                            ? " Gateway configurado."
+                            : " Sin Gateway: se usa mock local (desarrollo)."}
                         </p>
                       </div>
                     </div>
+                    {pendingFaceIdCatalog ? (
+                      <div className="rounded-sm border border-amber-700/40 bg-amber-950/30 px-3 py-3 text-[11px] text-amber-100/90 leading-relaxed">
+                        Rostro enrolado (
+                        <span className="font-mono">{pendingFaceIdCatalog.templateId}</span>
+                        ). Falló guardar <span className="font-mono">faceID</span> en catálogo.
+                        Reintenta sin volver a capturar.
+                      </div>
+                    ) : null}
                     <div>
                       <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
                         Terminal para captura
@@ -3777,7 +3866,8 @@ export default function Members() {
                             faceIdTerminal: e.target.value,
                           })
                         }
-                        className="w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none text-[12px]"
+                        disabled={Boolean(pendingFaceIdCatalog) || Boolean(wizardSync)}
+                        className="w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none text-[12px] disabled:opacity-50"
                       >
                         <option value="TRN-MAIN-01">TRN-MAIN-01 — Entrada principal</option>
                         <option value="TRN-MAIN-02">TRN-MAIN-02 — Entrada lateral</option>
@@ -3872,30 +3962,68 @@ export default function Members() {
                     <button
                       type="button"
                       onClick={goAddMemberBack}
-                      disabled={Boolean(wizardSync)}
+                      disabled={Boolean(wizardSync) || Boolean(pendingFaceIdCatalog)}
                       className="min-h-[44px] w-full sm:flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#1a1a1a] disabled:opacity-50"
                     >
                       Atrás
                     </button>
-                    <button
-                      type="button"
-                      disabled={Boolean(wizardSync)}
-                      onClick={() => void completeFaceIdStep({ enrollFaceId: false })}
-                      className="min-h-[44px] w-full sm:flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.35)] text-[#e5e2e1] py-3 font-bold text-[10px] tracking-[1px] uppercase hover:border-[#e31e24] disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      Omitir Face ID
-                    </button>
-                    <button
-                      type="button"
-                      disabled={Boolean(wizardSync)}
-                      onClick={() => void completeFaceIdStep({ enrollFaceId: true })}
-                      className="min-h-[44px] w-full sm:flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      {wizardSync === "faceid" ? (
-                        <Loader2 className="animate-spin" size={16} />
-                      ) : null}
-                      Registrar con Face ID
-                    </button>
+                    {pendingFaceIdCatalog ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={Boolean(wizardSync)}
+                          onClick={() => {
+                            if (!wizardMember || !pendingFaceIdCatalog) return;
+                            finishWizardAfterFaceId({
+                              ...wizardMember,
+                              faceIdTemplateId: pendingFaceIdCatalog.templateId,
+                              faceIdEnrolled: true,
+                            });
+                          }}
+                          className="min-h-[44px] w-full sm:flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.35)] text-[#e5e2e1] py-3 font-bold text-[10px] tracking-[1px] uppercase hover:border-[#e31e24] disabled:opacity-50"
+                        >
+                          Continuar sin sync
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(wizardSync)}
+                          onClick={() =>
+                            void completeFaceIdStep({
+                              enrollFaceId: false,
+                              retryCatalogOnly: true,
+                            })
+                          }
+                          className="min-h-[44px] w-full sm:flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {wizardSync === "faceid-catalog" ? (
+                            <Loader2 className="animate-spin" size={16} />
+                          ) : null}
+                          Reintentar guardar faceID
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          disabled={Boolean(wizardSync)}
+                          onClick={() => void completeFaceIdStep({ enrollFaceId: false })}
+                          className="min-h-[44px] w-full sm:flex-1 bg-[#0e0e0e] border border-[rgba(93,63,60,0.35)] text-[#e5e2e1] py-3 font-bold text-[10px] tracking-[1px] uppercase hover:border-[#e31e24] disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          Omitir Face ID
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(wizardSync)}
+                          onClick={() => void completeFaceIdStep({ enrollFaceId: true })}
+                          className="min-h-[44px] w-full sm:flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {wizardSync === "faceid" || wizardSync === "faceid-catalog" ? (
+                            <Loader2 className="animate-spin" size={16} />
+                          ) : null}
+                          Registrar con Face ID
+                        </button>
+                      </>
+                    )}
                   </>
                 )}
                 {addMemberStep === 4 && (

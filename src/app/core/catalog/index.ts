@@ -15,6 +15,7 @@ export { listClientsUseCase, sortMembersByDateAddedDesc } from "./useCases/listC
 export { getClientUseCase } from "./useCases/getClientUseCase";
 export { addClientUseCase } from "./useCases/addClientUseCase";
 export { updateClientUseCase } from "./useCases/updateClientUseCase";
+export { persistFaceIdUseCase } from "./useCases/persistFaceIdUseCase";
 export { deleteClientUseCase } from "./useCases/deleteClientUseCase";
 export {
   listPlansUseCase,

@@ -1,5 +1,7 @@
 /**
- * Tipos y funciones de integración con el proveedor FaceID / torniquetes (sustituir por llamadas HTTP reales).
+ * Tipos y mocks FaceID / torniquetes.
+ * Contrato canónico: docs/CONTRATO-ACCESS-GATEWAY.md
+ * Cliente real/mock: src/app/core/accessGateway
  */
 
 import {
@@ -7,50 +9,23 @@ import {
   buildUnknownCaptureDataUrl,
 } from "./accessCaptureImage";
 
-export type FaceIdVerifyRequest = {
-  terminalId: string;
-  captureSessionId: string;
-  /** Referencia de captura en el dispositivo */
-  faceTemplateRef?: string;
-};
+export type {
+  FaceIdEnrollRequest,
+  FaceIdEnrollResponse,
+  FaceIdVerifyRequest,
+  FaceIdVerifyResponse,
+  TurnstileCommandRequest,
+  TurnstileCommandResponse,
+} from "../core/accessGateway/types";
 
-export type FaceIdVerifyResponse = {
-  match: boolean;
-  confidence: number;
-  memberId?: string;
-  memberName?: string;
-  membershipTier?: string;
-  denyReason?: "NO_MATCH" | "SUSPENDED" | "EXPIRED";
-  vendorRequestId: string;
-  latencyMs: number;
-  /** Instantánea del intento (URL HTTPS o data URL). Lo envía el Access Gateway. */
-  captureSnapshotUrl?: string;
-};
-
-export type TurnstileCommandRequest = {
-  terminalId: string;
-  command: "OPEN" | "CLOSE" | "HOLD";
-  correlationId: string;
-};
-
-export type TurnstileCommandResponse = {
-  accepted: boolean;
-  vendorCommandId: string;
-  appliedAtIso: string;
-};
-
-export type FaceIdEnrollRequest = {
-  terminalId: string;
-  memberId: string;
-  displayName?: string;
-};
-
-export type FaceIdEnrollResponse = {
-  templateId: string;
-  vendorRequestId: string;
-  qualityScore: number;
-  latencyMs: number;
-};
+import type {
+  FaceIdEnrollRequest,
+  FaceIdEnrollResponse,
+  FaceIdVerifyRequest,
+  FaceIdVerifyResponse,
+  TurnstileCommandRequest,
+  TurnstileCommandResponse,
+} from "../core/accessGateway/types";
 
 function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -97,10 +72,13 @@ export async function mockFaceIdEnroll(req: FaceIdEnrollRequest): Promise<FaceId
   const latencyMs = 520 + Math.round(Math.random() * 380);
   await delay(latencyMs);
   return {
+    ok: true,
     templateId: `tmpl_${req.memberId.replace(/\W/g, "")}_${Math.random().toString(36).slice(2, 8)}`,
     vendorRequestId: `fv_enroll_${Math.random().toString(36).slice(2, 10)}`,
     qualityScore: 0.91 + Math.random() * 0.08,
     latencyMs,
+    terminalId: req.terminalId,
+    enrolledAtIso: new Date().toISOString(),
   };
 }
 
