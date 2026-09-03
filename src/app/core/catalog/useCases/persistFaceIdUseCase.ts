@@ -28,17 +28,27 @@ export async function persistFaceIdUseCase(input: {
   /** PIN en dispositivo; default = clientID. */
   pin?: string;
 }): Promise<UpdateClientResult> {
+  // Intentar extraer clientID de varias formas:
+  // 1. CLI-123  2. CLI_123  3. "123" puro  4. dígitos embebidos
+  const memberId = (input.member.id ?? "").trim();
   const clientId =
-    clientIdFromMemberId(input.member.id) ??
+    clientIdFromMemberId(memberId) ??
     (() => {
-      const n = Number(String(input.member.id).replace(/\D/g, ""));
+      // CLI_123 (underscore) o CLI123 (sin separador)
+      const alt = memberId.match(/^CLI[_-]?(\d+)$/i);
+      if (alt) {
+        const n = Number(alt[1]);
+        return Number.isFinite(n) && n > 0 ? n : null;
+      }
+      // Solo dígitos
+      const n = Number(memberId.replace(/\D/g, ""));
       return Number.isFinite(n) && n > 0 ? n : null;
     })();
 
   if (!clientId) {
     return {
       ok: false,
-      message: "Este miembro no tiene clientID de catálogo para guardar faceID.",
+      message: `No se pudo derivar clientID del miembro (id="${memberId}"). Verifica el formato.`,
     };
   }
 

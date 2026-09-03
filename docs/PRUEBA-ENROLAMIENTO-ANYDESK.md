@@ -66,46 +66,67 @@ Debe mostrar: `Access Gateway STUB escuchando http://0.0.0.0:8787`
 
 Probar en el mismo PC: abrir `http://127.0.0.1:8787/health`
 
-### 2. Exponer HTTPS (obligatorio — Elite es HTTPS)
+### 2. Conectar Elite al Gateway (sin Cloudflare)
 
-El navegador bloquea **mixed content** (página HTTPS → API HTTP). Opciones:
+El sitio Elite es HTTPS. El stub corre **en el mismo PC** que el navegador (vía AnyDesk). Tres opciones:
 
-**A — Cloudflare Tunnel (recomendado para prueba rápida)**
+#### Opción A — `http://127.0.0.1` (la más simple)
 
-```bash
-cloudflared tunnel --url http://127.0.0.1:8787
-```
+Chrome y Edge **permiten** que una página HTTPS llame a `http://127.0.0.1` en el **mismo equipo**.
 
-Copia la URL `https://….trycloudflare.com`.
-
-**B — Build con URL fija** (si tienes hostname HTTPS estable):
-
-```env
-VITE_ACCESS_GATEWAY_URL=https://tu-gateway.dominio.com
-```
-
-Luego `npm run build` y redeploy a Neubox.
-
-### 3. Apuntar Elite al Gateway (sin rebuild)
-
-En el PC gym, abre [https://elitegym247.tanosi.com.mx/login](https://elitegym247.tanosi.com.mx/login), inicia sesión, abre la consola (F12):
+1. Arranca el stub: `node server.mjs`
+2. En [https://elitegym247.tanosi.com.mx/login](https://elitegym247.tanosi.com.mx/login), consola (F12):
 
 ```js
-localStorage.setItem(
-  "elite_access_gateway_url",
-  "https://TU-URL.trycloudflare.com"
-);
+localStorage.setItem("elite_access_gateway_url", "http://127.0.0.1:8787");
 location.reload();
 ```
 
-Para volver a mock:
+3. Comprueba: abre `http://127.0.0.1:8787/health` en otra pestaña.
+
+Si el navegador bloquea la petición (mixed content), usa la **Opción B**.
+
+#### Opción B — HTTPS local con certificado autofirmado
+
+En la carpeta del stub:
+
+```bat
+generate-certs.bat
+set ACCESS_GATEWAY_TLS=1
+node server.mjs
+```
+
+1. Abre **una vez** `https://127.0.0.1:8787/health` y acepta el certificado (avanzado → continuar).
+2. En Elite, consola:
+
+```js
+localStorage.setItem("elite_access_gateway_url", "https://127.0.0.1:8787");
+location.reload();
+```
+
+#### Opción C — localtunnel (HTTPS público temporal, sin cuenta Cloudflare)
+
+Con el stub en `:8787`:
+
+```bash
+npx localtunnel --port 8787
+```
+
+Copia la URL `https://….loca.lt` (a veces pide un código en la primera visita).
+
+```js
+localStorage.setItem("elite_access_gateway_url", "https://TU-URL.loca.lt");
+location.reload();
+```
+
+#### Volver a mock
 
 ```js
 localStorage.removeItem("elite_access_gateway_url");
 location.reload();
 ```
 
-### 4. Enrolar desde Members
+### 3. Enrolar desde Members
 
 1. **Miembros → Nuevo miembro** → pasos 1–2 (alta + cobro).
 2. Paso 3 → elige terminal (`TRN-MAIN-01` / `02`) → **Registrar con Face ID**.
@@ -115,7 +136,7 @@ location.reload();
    - Resumen muestra Face ID registrado.
 4. Si Catálogo falla: botón **Reintentar guardar faceID** (no re-captura).
 
-### 5. Verificar
+### 4. Verificar
 
 - Consola stub: línea `[enroll] CLI-… @ TRN-MAIN-01 …`
 - Ficha del miembro / ViewAll: campo `faceID` poblado.
@@ -144,7 +165,7 @@ Así no hay mixed content. Útil si Neubox aún no tiene el build nuevo.
 | Síntoma | Causa | Qué hacer |
 |---------|--------|-----------|
 | `NETWORK` / Failed to fetch | Stub apagado o URL mala | `/health` y revisar `localStorage` |
-| Mixed content bloqueado | HTTPS→HTTP | Usar cloudflared / HTTPS |
+| Mixed content bloqueado | HTTPS→HTTP (Firefox, etc.) | Opción B (HTTPS local) u Opción C (localtunnel) |
 | `TERMINAL_NOT_FOUND` | `terminalId` raro | Solo `TRN-MAIN-01` / `02` |
 | Enroll OK, toast catálogo | PUT Client/Update | Reintentar sync; revisar proxy PUT |
 | Mock sigue activo | Sin URL gateway | Set `localStorage` o `VITE_ACCESS_GATEWAY_URL` |
