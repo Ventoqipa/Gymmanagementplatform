@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ScanFace,
   Shield,
@@ -15,25 +15,67 @@ import {
   appendAccessEnrollment,
   appendAccessLog,
   getAccessEnrollments,
-  getAccessLog,
   getTurnstileStates,
+  replaceAccessLog,
   updateTurnstile,
   type AccessEnrollmentRecord,
+  type AccessLogEntry,
 } from "../lib/demoStore";
-import { AccessGatewayError, enrollFaceId } from "../core/accessGateway";
+import {
+  AccessGatewayError,
+  ACCESS_TERMINALS,
+  accessGatewayConfig,
+  enrollFaceId,
+  fetchAccessEvents,
+  isAccessGatewayConfigured,
+  setAccessGatewayRuntimeUrl,
+  turnstileCommand,
+  verifyFaceId,
+  type AccessGatewayEvent,
+} from "../core/accessGateway";
 import { clientIdFromMemberId, persistFaceIdUseCase } from "../core/catalog";
-import { mockFaceIdVerify, mockTurnstileCommand } from "../lib/thirdPartyMocks";
 import { loadMembers, saveMembers } from "../lib/membersStore";
-import type { AccessLogEntry } from "../lib/demoStore";
 import { buildUnknownCaptureDataUrl } from "../lib/accessCaptureImage";
+import { useAccessGatewayStatus } from "../context/AccessGatewayStatusContext";
+
+const GYM_GATEWAY_URL = "http://127.0.0.1:8787";
+
 type EnrollPhase = "idle" | "capturing" | "registering";
 
+function gatewayEventToLog(evt: AccessGatewayEvent): AccessLogEntry {
+  return {
+    id: evt.id,
+    timestampIso: evt.timestampIso,
+    memberName: evt.memberName,
+    memberId: evt.memberId,
+    tier: evt.tier || "N/A",
+    result: evt.result,
+    reason: evt.reason,
+    terminalId: evt.terminalId,
+    faceIdVendorRequestId: evt.faceIdVendorRequestId ?? "—",
+    turnstileVendorCommandId: evt.turnstileVendorCommandId ?? "—",
+    captureSnapshotUrl: evt.captureSnapshotUrl,
+    confidence: evt.confidence,
+  };
+}
+
 export default function AccessControl() {
-  const [log, setLog] = useState(getAccessLog);
+  const {
+    online: gatewayOnline,
+    status: linkStatus,
+    terminals: gatewayTerminals,
+    infoMessage,
+    refreshStatus,
+  } = useAccessGatewayStatus();
+
+  const [log, setLog] = useState<AccessLogEntry[]>([]);
   const [turnstiles, setTurnstiles] = useState(getTurnstileStates);
   const [busy, setBusy] = useState(false);
   const [lastLatency, setLastLatency] = useState<number | null>(null);
   const [selectedTerminal, setSelectedTerminal] = useState("TRN-MAIN-01");
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsNote, setEventsNote] = useState("Cargando accesos reales…");
+  const initialEventsLoad = useRef(true);
 
   const [enrollMemberId, setEnrollMemberId] = useState("");
   const [enrollName, setEnrollName] = useState("");
@@ -58,26 +100,109 @@ export default function AccessControl() {
   const liveFeed = useMemo(() => log.slice(0, 12), [log]);
   const latestAccess = liveFeed[0] ?? null;
 
-  const refreshFromStore = () => {
-    setLog(getAccessLog());
+  const syncTurnstilesFromGateway = useCallback(() => {
+    const list =
+      gatewayTerminals.length > 0
+        ? gatewayTerminals
+        : Object.keys(ACCESS_TERMINALS).map((terminalId) => ({
+            terminalId,
+            online: false,
+            serial: ACCESS_TERMINALS[terminalId]?.serial,
+            label: ACCESS_TERMINALS[terminalId]?.label,
+          }));
+
+    for (const t of list) {
+      const lastSeen =
+        "lastSeenIso" in t && typeof t.lastSeenIso === "string"
+          ? t.lastSeenIso
+          : undefined;
+      updateTurnstile(t.terminalId, {
+        online: Boolean(t.online),
+        label: t.label || ACCESS_TERMINALS[t.terminalId]?.label,
+        lastEventIso: lastSeen,
+      });
+    }
     setTurnstiles(getTurnstileStates());
-  };
+  }, [gatewayTerminals]);
+
+  const pullLiveEvents = useCallback(async () => {
+    if (!isAccessGatewayConfigured()) {
+      setAccessGatewayRuntimeUrl(GYM_GATEWAY_URL);
+    }
+    if (!isAccessGatewayConfigured()) {
+      setLog([]);
+      setEventsLoading(false);
+      setEventsNote("Sin sistema de acceso. Vaya a Panel y pulse Reconectar.");
+      return;
+    }
+
+    if (initialEventsLoad.current) setEventsLoading(true);
+    try {
+      const events = await fetchAccessEvents({ limit: 50 });
+      const rows = events.map(gatewayEventToLog);
+      replaceAccessLog(rows);
+      setLog(rows);
+
+      for (const evt of events) {
+        if (evt.result === "GRANTED") {
+          updateTurnstile(evt.terminalId, { lastAction: "OPEN" });
+        } else {
+          updateTurnstile(evt.terminalId, { lastAction: "CLOSED" });
+        }
+      }
+      setTurnstiles(getTurnstileStates());
+
+      if (!gatewayOnline) {
+        setEventsNote("Sistema sin conexión. Los accesos se mostrarán al reconectar.");
+      } else if (rows.length === 0) {
+        setEventsNote(
+          "Conectado. Aún no hay accesos: cuando un socio pase por el lector, aparecerán aquí.",
+        );
+      } else {
+        setEventsNote(`${rows.length} acceso(s) reales desde el lector.`);
+      }
+    } catch {
+      setEventsNote("No se pudieron leer los accesos. Intente de nuevo desde Panel → Reconectar.");
+    } finally {
+      initialEventsLoad.current = false;
+      setEventsLoading(false);
+    }
+  }, [gatewayOnline]);
 
   useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "elite_gym_v1_access_log") refreshFromStore();
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+    syncTurnstilesFromGateway();
+  }, [syncTurnstilesFromGateway]);
 
-  const simulateScan = async () => {
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      await pullLiveEvents();
+    };
+    void tick();
+    const timer = window.setInterval(
+      () => void tick(),
+      accessGatewayConfig.eventsPollMs,
+    );
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [pullLiveEvents]);
+
+  const waitForRealAccess = async () => {
+    if (!gatewayOnline) {
+      toast.error("Sin conexión", {
+        description: "Vaya a Panel y pulse Reconectar antes de esperar un acceso.",
+      });
+      return;
+    }
     setBusy(true);
     setLastLatency(null);
     const captureSessionId = `cap_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
     try {
-      const face = await mockFaceIdVerify({
+      const face = await verifyFaceId({
         terminalId: selectedTerminal,
         captureSessionId,
       });
@@ -85,61 +210,93 @@ export default function AccessControl() {
       setLastLatency(face.latencyMs);
 
       if (face.match && face.memberName) {
-        const open = await mockTurnstileCommand({
+        const open = await turnstileCommand({
           terminalId: selectedTerminal,
           command: "OPEN",
           correlationId: face.vendorRequestId,
         });
         updateTurnstile(selectedTerminal, { lastAction: "OPEN" });
-        appendAccessLog({
-          timestampIso: new Date().toISOString(),
-          memberName: face.memberName,
-          memberId: face.memberId,
-          tier: face.membershipTier ?? "N/A",
-          result: "GRANTED",
-          terminalId: selectedTerminal,
-          faceIdVendorRequestId: face.vendorRequestId,
-          turnstileVendorCommandId: open.vendorCommandId,
-          captureSnapshotUrl: face.captureSnapshotUrl,
-          confidence: face.confidence,
-        });
+        const already = log.some(
+          (e) => e.faceIdVendorRequestId === face.vendorRequestId,
+        );
+        if (!already) {
+          appendAccessLog({
+            id: face.vendorRequestId || undefined,
+            timestampIso: new Date().toISOString(),
+            memberName: face.memberName,
+            memberId: face.memberId,
+            tier: face.membershipTier ?? "N/A",
+            result: "GRANTED",
+            terminalId: selectedTerminal,
+            faceIdVendorRequestId: face.vendorRequestId,
+            turnstileVendorCommandId: open.vendorCommandId,
+            captureSnapshotUrl: face.captureSnapshotUrl,
+            confidence: face.confidence,
+          });
+        }
         window.setTimeout(() => {
-          void mockTurnstileCommand({
+          void turnstileCommand({
             terminalId: selectedTerminal,
             command: "CLOSE",
             correlationId: `${face.vendorRequestId}_close`,
           }).then(() => {
             updateTurnstile(selectedTerminal, { lastAction: "CLOSED" });
-            refreshFromStore();
+            setTurnstiles(getTurnstileStates());
           });
         }, 1800);
+        toast.success("Acceso otorgado", {
+          description: `${face.memberName} · ${(face.confidence * 100).toFixed(1)}%`,
+        });
       } else {
-        await mockTurnstileCommand({
+        await turnstileCommand({
           terminalId: selectedTerminal,
           command: "HOLD",
           correlationId: face.vendorRequestId,
         });
         updateTurnstile(selectedTerminal, { lastAction: "CLOSED" });
-        appendAccessLog({
-          timestampIso: new Date().toISOString(),
-          memberName: "Unknown",
-          tier: "N/A",
-          result: "DENIED",
-          reason: face.denyReason,
-          terminalId: selectedTerminal,
-          faceIdVendorRequestId: face.vendorRequestId,
-          turnstileVendorCommandId: "ts_hold",
-          captureSnapshotUrl: face.captureSnapshotUrl,
-          confidence: face.confidence,
+        const already = log.some(
+          (e) => e.faceIdVendorRequestId === face.vendorRequestId,
+        );
+        if (!already) {
+          appendAccessLog({
+            id: face.vendorRequestId || undefined,
+            timestampIso: new Date().toISOString(),
+            memberName: "Desconocido",
+            tier: "N/A",
+            result: "DENIED",
+            reason: face.denyReason,
+            terminalId: selectedTerminal,
+            faceIdVendorRequestId: face.vendorRequestId,
+            turnstileVendorCommandId: "hold",
+            captureSnapshotUrl: face.captureSnapshotUrl,
+            confidence: face.confidence,
+          });
+        }
+        toast.error("Acceso denegado", {
+          description: face.denyReason ?? "Sin coincidencia",
         });
       }
+      await pullLiveEvents();
+      await refreshStatus();
+    } catch (error) {
+      const detail =
+        error instanceof AccessGatewayError
+          ? `${error.code}: ${error.message}`
+          : "No se pudo verificar el rostro en el lector.";
+      toast.error("Error de verificación", { description: detail });
     } finally {
-      refreshFromStore();
+      setTurnstiles(getTurnstileStates());
       setBusy(false);
     }
   };
 
   const runEnrollment = async () => {
+    if (!gatewayOnline) {
+      toast.error("Sin conexión", {
+        description: "Vaya a Panel y pulse Reconectar antes de registrar un rostro.",
+      });
+      return;
+    }
     const mid = enrollMemberId.trim().toUpperCase();
     if (!mid) {
       toast.error("Indique el ID de miembro.", { description: "Ejemplo: CLI-123" });
@@ -150,12 +307,17 @@ export default function AccessControl() {
     await new Promise((r) => setTimeout(r, 400));
     setEnrollPhase("registering");
     try {
-      const clientId = clientIdFromMemberId(mid) ?? undefined;
+      const clientId =
+        clientIdFromMemberId(mid) ??
+        (() => {
+          const m = mid.match(/^CLI[_-]?(\d+)$/i);
+          return m ? Number(m[1]) : undefined;
+        })();
       const res = await enrollFaceId({
         terminalId: enrollTerminal,
         memberId: mid,
         displayName: enrollName.trim() || undefined,
-        clientId,
+        clientId: clientId && clientId > 0 ? clientId : undefined,
       });
       const display = enrollName.trim() || mid;
       const rec = appendAccessEnrollment({
@@ -167,8 +329,7 @@ export default function AccessControl() {
       });
       setRecentEnrollments((prev) => [rec, ...prev].slice(0, 12));
 
-      // Persistir faceID en Catálogo si el ID es CLI-{n} y hay ficha local.
-      if (clientId) {
+      if (clientId && clientId > 0) {
         const local = loadMembers().find((m) => m.id.toUpperCase() === mid);
         if (local) {
           const catalog = await persistFaceIdUseCase({
@@ -188,7 +349,7 @@ export default function AccessControl() {
             );
             saveMembers(next);
           } else {
-            toast.warning("Enrolado en Gateway; falta faceID en catálogo", {
+            toast.warning("Enrolado en el lector; falta guardar faceID en catálogo", {
               description: catalog.message,
               duration: 10_000,
             });
@@ -199,6 +360,7 @@ export default function AccessControl() {
       toast.success("Rostro registrado", {
         description: `${display} · Calidad ${(res.qualityScore * 100).toFixed(1)}%`,
       });
+      await pullLiveEvents();
     } catch (error) {
       const detail =
         error instanceof AccessGatewayError
@@ -212,7 +374,11 @@ export default function AccessControl() {
   };
 
   const formatTime = (iso: string) =>
-    new Date(iso).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    new Date(iso).toLocaleTimeString("es-MX", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
 
   const formatShort = (iso: string) =>
     new Date(iso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" });
@@ -220,15 +386,53 @@ export default function AccessControl() {
   const snapshotFor = (row: AccessLogEntry) =>
     row.captureSnapshotUrl ?? buildUnknownCaptureDataUrl();
 
+  const terminalOptions = Object.entries(ACCESS_TERMINALS);
   return (
     <div className="h-full bg-[#131313] p-4 md:p-6 overflow-auto">
-      <div className="mb-3 md:mb-4">
-        <h1 className="text-[#e5e2e1] text-[22px] md:text-[30px] font-black tracking-[-0.5px] uppercase leading-tight">
-          Control de acceso
-        </h1>
-        <p className="text-[#808080] text-[11px] mt-1 max-w-3xl leading-relaxed">
-          Control de accesos por reconocimiento facial y sincronización con torniquetes en tiempo real.
-        </p>
+      <div className="mb-3 md:mb-4 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+        <div>
+          <h1 className="text-[#e5e2e1] text-[22px] md:text-[30px] font-black tracking-[-0.5px] uppercase leading-tight">
+            Control de acceso
+          </h1>
+          <p className="text-[#808080] text-[11px] mt-1 max-w-3xl leading-relaxed">
+            Monitor de accesos reales desde los lectores. Solo se muestran visitas
+            capturadas por el hardware.
+          </p>
+        </div>
+        <div className="text-[10px] uppercase tracking-wide space-y-1 md:text-right">
+          <p
+            className={`font-bold ${
+              gatewayOnline
+                ? "text-[#00ff00]"
+                : linkStatus === "checking"
+                  ? "text-[#c8c8c8]"
+                  : "text-[#e31e24]"
+            }`}
+          >
+            Acceso:{" "}
+            {linkStatus === "checking"
+              ? "comprobando…"
+              : gatewayOnline
+                ? "conectado"
+                : "sin conexión"}
+          </p>
+          {gatewayTerminals.length > 0 && (
+            <p className="text-[#5a5a5a] normal-case tracking-normal">
+              Lectores:{" "}
+              {gatewayTerminals
+                .map(
+                  (t) =>
+                    `${t.label || t.terminalId} ${t.online ? "conectado" : "apagado"}`,
+                )
+                .join(" · ")}
+            </p>
+          )}
+          {infoMessage ? (
+            <p className="text-[#5a5a5a] normal-case tracking-normal max-w-xs md:ml-auto">
+              {infoMessage}
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4 md:p-6 mb-6">
@@ -238,13 +442,21 @@ export default function AccessControl() {
             <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
               Monitor en vivo
             </p>
-            <span className="inline-flex items-center gap-1 text-[9px] uppercase text-[#00ff00] font-bold">
-              <span className="w-2 h-2 rounded-full bg-[#00ff00] animate-pulse" />
-              Live
+            <span
+              className={`inline-flex items-center gap-1 text-[9px] uppercase font-bold ${
+                gatewayOnline ? "text-[#00ff00]" : "text-[#808080]"
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  gatewayOnline ? "bg-[#00ff00] animate-pulse" : "bg-[#5a5a5a]"
+                }`}
+              />
+              {gatewayOnline ? "En vivo" : "Sin conexión"}
             </span>
           </div>
           <p className="text-[#5a5a5a] text-[10px]">
-            Instantánea por intento de acceso · actualiza al escanear en cualquier terminal
+            {eventsLoading ? "Actualizando…" : eventsNote}
           </p>
         </div>
 
@@ -258,7 +470,9 @@ export default function AccessControl() {
                   : "border-[rgba(93,63,60,0.2)]"
             }`}
           >
-            <p className="text-[9px] uppercase tracking-wider text-[#808080] mb-2">Último intento</p>
+            <p className="text-[9px] uppercase tracking-wider text-[#808080] mb-2">
+              Último intento
+            </p>
             {latestAccess ? (
               <>
                 <div className="aspect-square bg-[#1a1a1a] overflow-hidden mb-3">
@@ -275,26 +489,38 @@ export default function AccessControl() {
                 >
                   {latestAccess.result}
                 </p>
-                <p className="text-[#e5e2e1] text-[15px] font-bold mt-1">{latestAccess.memberName}</p>
-                <p className="text-[#808080] text-[10px] font-mono mt-1">{latestAccess.terminalId}</p>
+                <p className="text-[#e5e2e1] text-[15px] font-bold mt-1">
+                  {latestAccess.memberName}
+                </p>
+                <p className="text-[#808080] text-[10px] font-mono mt-1">
+                  {latestAccess.terminalId}
+                </p>
                 {latestAccess.confidence != null && (
                   <p className="text-[#5a5a5a] text-[10px] mt-1">
                     Confianza {(latestAccess.confidence * 100).toFixed(1)}%
                   </p>
                 )}
-                <p className="text-[#393939] text-[9px] mt-2">{formatTime(latestAccess.timestampIso)}</p>
+                <p className="text-[#393939] text-[9px] mt-2">
+                  {formatTime(latestAccess.timestampIso)}
+                </p>
               </>
             ) : (
               <div className="aspect-square bg-[#1a1a1a] flex items-center justify-center text-[#5a5a5a] text-[12px] text-center px-4">
-                Sin capturas aún. Escanee un rostro o espere eventos del lector.
+                {eventsLoading
+                  ? "Cargando…"
+                  : "Sin capturas aún. Cuando un socio pase por el lector, aparecerá aquí."}
               </div>
             )}
           </div>
 
           <div className="lg:col-span-2">
-            <p className="text-[9px] uppercase tracking-wider text-[#808080] mb-3">Últimos rostros</p>
+            <p className="text-[9px] uppercase tracking-wider text-[#808080] mb-3">
+              Últimos rostros
+            </p>
             {liveFeed.length === 0 ? (
-              <p className="text-[#5a5a5a] text-[12px]">El muro de accesos se llenará en tiempo real.</p>
+              <p className="text-[#5a5a5a] text-[12px]">
+                El muro de accesos se llenará en tiempo real con cada paso por el lector.
+              </p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[420px] overflow-auto pr-1">
                 {liveFeed.map((row) => (
@@ -323,8 +549,12 @@ export default function AccessControl() {
                       </span>
                     </div>
                     <div className="p-2">
-                      <p className="text-[#e5e2e1] text-[10px] font-bold truncate">{row.memberName}</p>
-                      <p className="text-[#5a5a5a] text-[9px] font-mono">{formatTime(row.timestampIso)}</p>
+                      <p className="text-[#e5e2e1] text-[10px] font-bold truncate">
+                        {row.memberName}
+                      </p>
+                      <p className="text-[#5a5a5a] text-[9px] font-mono">
+                        {formatTime(row.timestampIso)}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -343,37 +573,51 @@ export default function AccessControl() {
                 Verificación FaceID
               </p>
             </div>
-            <span className="text-[9px] uppercase tracking-wider text-[#00ff00] font-bold">En línea</span>
+            <span
+              className={`text-[9px] uppercase tracking-wider font-bold ${
+                gatewayOnline ? "text-[#00ff00]" : "text-[#e31e24]"
+              }`}
+            >
+              {gatewayOnline ? "En línea" : "Sin conexión"}
+            </span>
           </div>
-          <p className="text-[#e5e2e1] text-[20px] font-black mb-2">Lector listo</p>
+          <p className="text-[#e5e2e1] text-[20px] font-black mb-2">
+            {gatewayOnline ? "Lectores activos" : "Sistema desconectado"}
+          </p>
           <p className="text-[#808080] text-[11px] mb-4">
-            Inicie una lectura en el terminal seleccionado. Los eventos quedan registrados y el torniquete actúa según el
-            resultado.
+            El socio se para frente al lector. Pulse el botón y espere la lectura real
+            (hasta ~45 s).
           </p>
           <div className="space-y-3 text-[10px]">
             <div>
-              <label className="text-[#e7bdb8] uppercase tracking-wide block mb-1">Terminal</label>
+              <label className="text-[#e7bdb8] uppercase tracking-wide block mb-1">
+                Terminal
+              </label>
               <select
                 value={selectedTerminal}
                 onChange={(e) => setSelectedTerminal(e.target.value)}
                 className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none"
               >
-                <option value="TRN-MAIN-01">TRN-MAIN-01 — Entrada principal</option>
-                <option value="TRN-MAIN-02">TRN-MAIN-02 — Entrada lateral</option>
+                {terminalOptions.map(([id, meta]) => (
+                  <option key={id} value={id}>
+                    {meta.label}
+                  </option>
+                ))}
               </select>
             </div>
             <button
               type="button"
-              onClick={() => void simulateScan()}
-              disabled={busy}
+              onClick={() => void waitForRealAccess()}
+              disabled={busy || !gatewayOnline}
               className="w-full bg-[#e31e24] text-[#410002] py-3 px-6 font-bold text-[12px] tracking-[1.2px] uppercase hover:bg-[#c41a20] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {busy ? <Loader2 className="animate-spin" size={18} /> : <ScanFace size={18} />}
-              Escanear rostro
+              {busy ? "Esperando al lector…" : "Esperar acceso en terminal"}
             </button>
             {lastLatency != null && (
               <p className="text-[#808080]">
-                Última respuesta: <span className="text-[#e5e2e1] font-mono">{lastLatency} ms</span>
+                Última respuesta:{" "}
+                <span className="text-[#e5e2e1] font-mono">{lastLatency} ms</span>
               </p>
             )}
           </div>
@@ -382,25 +626,39 @@ export default function AccessControl() {
         <div className="bg-[#2a2a2a] border border-[rgba(93,63,60,0.1)] p-6">
           <div className="flex items-center gap-2 mb-4">
             <DoorOpen className="text-[#e31e24]" size={22} />
-            <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">Torniquetes</p>
+            <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
+              Torniquetes
+            </p>
           </div>
           <div className="space-y-3">
-            {turnstiles.map((t) => (
+            {turnstiles.map((t) => {
+              const gw = gatewayTerminals.find((x) => x.terminalId === t.terminalId);
+              const online = gw ? Boolean(gw.online) : t.online;
+              return (
               <div
                 key={t.terminalId}
                 className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4 flex items-start justify-between gap-3"
               >
                 <div>
-                  <p className="text-[#e5e2e1] text-[12px] font-bold font-mono">{t.terminalId}</p>
+                  <p className="text-[#e5e2e1] text-[12px] font-bold font-mono">
+                    {t.terminalId}
+                  </p>
                   <p className="text-[#808080] text-[10px]">{t.label}</p>
+                  {gw?.serial ? (
+                    <p className="text-[#393939] text-[9px] font-mono mt-1">{gw.serial}</p>
+                  ) : null}
                   <p className="text-[#393939] text-[9px] mt-2 uppercase">
                     Último evento: {t.lastEventIso ? formatTime(t.lastEventIso) : "—"}
                   </p>
                 </div>
                 <div className="text-right space-y-1">
-                  <div className="flex items-center justify-end gap-1 text-[10px] text-[#00ff00] font-bold uppercase">
+                  <div
+                    className={`flex items-center justify-end gap-1 text-[10px] font-bold uppercase ${
+                      online ? "text-[#00ff00]" : "text-[#e31e24]"
+                    }`}
+                  >
                     <Radio size={12} />
-                    {t.online ? "online" : "offline"}
+                    {online ? "online" : "offline"}
                   </div>
                   <p
                     className={`text-[11px] font-black uppercase ${
@@ -415,11 +673,11 @@ export default function AccessControl() {
                   </p>
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
           <p className="text-[#808080] text-[10px] mt-4 leading-relaxed">
-            Estado en vivo de los torniquetes vinculados. Los comandos de apertura y cierre regulan el acceso según la
-            política del club.
+            Estado real de cada lector. Si aparece desconectado, use Panel → Reconectar.
           </p>
         </div>
 
@@ -464,8 +722,8 @@ export default function AccessControl() {
             Nuevo rostro FaceID
           </h2>
           <p className="text-[#808080] text-[11px] mb-6 leading-relaxed">
-            Asocie la plantilla facial de un miembro al sistema. Utilice el mismo terminal donde el miembro realizará el
-            registro guiado.
+            Equivalente al alta biométrica en el lector. Use el ID de catálogo{" "}
+            <span className="font-mono text-[#e7bdb8]">CLI-123</span>.
           </p>
 
           <div className="space-y-4">
@@ -477,7 +735,7 @@ export default function AccessControl() {
                 type="text"
                 value={enrollMemberId}
                 onChange={(e) => setEnrollMemberId(e.target.value)}
-                placeholder="MEM-1247"
+                placeholder="CLI-123"
                 className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 font-mono text-[12px] focus:border-[#e31e24] focus:outline-none uppercase"
                 disabled={enrollBusy}
               />
@@ -503,19 +761,30 @@ export default function AccessControl() {
                 value={enrollTerminal}
                 onChange={(e) => setEnrollTerminal(e.target.value)}
                 className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none"
-                disabled={enrollBusy}
+                disabled={enrollBusy || !gatewayOnline}
               >
-                <option value="TRN-MAIN-01">TRN-MAIN-01 — Entrada principal</option>
-                <option value="TRN-MAIN-02">TRN-MAIN-02 — Entrada lateral</option>
+                {terminalOptions.map(([id, meta]) => (
+                  <option key={id} value={id}>
+                    {meta.label}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div className="flex items-center gap-2 text-[9px] text-[#5a5a5a] uppercase tracking-wider">
-              <span className={enrollPhase === "capturing" ? "text-[#e31e24] font-bold" : ""}>Captura</span>
+              <span className={enrollPhase === "capturing" ? "text-[#e31e24] font-bold" : ""}>
+                Captura
+              </span>
               <span className="text-[#393939]">→</span>
-              <span className={enrollPhase === "registering" ? "text-[#e31e24] font-bold" : ""}>Registro</span>
+              <span className={enrollPhase === "registering" ? "text-[#e31e24] font-bold" : ""}>
+                Registro
+              </span>
               <span className="text-[#393939]">→</span>
-              <span className={enrollPhase === "idle" && !enrollBusy ? "text-[#808080]" : "text-[#393939]"}>
+              <span
+                className={
+                  enrollPhase === "idle" && !enrollBusy ? "text-[#808080]" : "text-[#393939]"
+                }
+              >
                 Confirmación
               </span>
             </div>
@@ -529,14 +798,14 @@ export default function AccessControl() {
             {enrollPhase === "registering" && (
               <p className="text-[#e5e2e1] text-[11px] flex items-center gap-2">
                 <Loader2 className="animate-spin text-[#e31e24] shrink-0" size={16} />
-                Procesando plantilla y sincronizando con el motor biométrico…
+                Procesando plantilla y sincronizando…
               </p>
             )}
 
             <button
               type="button"
               onClick={() => void runEnrollment()}
-              disabled={enrollBusy}
+              disabled={enrollBusy || !gatewayOnline}
               className="w-full bg-[#0e0e0e] border border-[#e31e24] text-[#e31e24] py-3 px-6 font-bold text-[11px] tracking-[1px] uppercase hover:bg-[#e31e24] hover:text-white transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {enrollBusy ? <Loader2 className="animate-spin" size={18} /> : <Camera size={18} />}
@@ -584,7 +853,10 @@ export default function AccessControl() {
           </p>
           <button
             type="button"
-            onClick={refreshFromStore}
+            onClick={() => {
+              void pullLiveEvents();
+              void refreshStatus();
+            }}
             className="text-[10px] font-bold uppercase tracking-wide text-[#808080] hover:text-[#e31e24] text-left sm:text-right"
           >
             Actualizar
@@ -616,7 +888,9 @@ export default function AccessControl() {
                   {row.memberId && (
                     <span className="text-[#808080] text-[10px] font-mono">{row.memberId}</span>
                   )}
-                  <span className="text-[#808080] text-[10px] tracking-[1px] uppercase">{row.tier}</span>
+                  <span className="text-[#808080] text-[10px] tracking-[1px] uppercase">
+                    {row.tier}
+                  </span>
                   <span className="text-[#393939] text-[9px] font-mono">{row.terminalId}</span>
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#808080] font-mono">

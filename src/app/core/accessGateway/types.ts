@@ -74,6 +74,8 @@ export type FaceIdVerifyRequest = {
   terminalId: AccessTerminalId;
   captureSessionId: string;
   faceTemplateRef?: string;
+  /** Segundos de espera de ATTLOG real. Default 45. */
+  timeoutSeconds?: number;
 };
 
 export type FaceIdVerifyResponse = {
@@ -99,6 +101,23 @@ export type TurnstileCommandResponse = {
   accepted: boolean;
   vendorCommandId: string;
   appliedAtIso: string;
+};
+
+/** Evento de acceso (muro Elite). GET /v1/events */
+export type AccessGatewayEvent = {
+  id: string;
+  timestampIso: string;
+  memberId?: string;
+  memberName: string;
+  tier: string;
+  result: "GRANTED" | "DENIED";
+  reason?: string;
+  terminalId: string;
+  confidence?: number;
+  captureSnapshotUrl?: string;
+  faceIdVendorRequestId?: string;
+  turnstileVendorCommandId?: string;
+  source?: string;
 };
 
 export function clientIdFromMemberId(memberId: string): number | null {

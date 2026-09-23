@@ -60,14 +60,14 @@ const DEFAULT_TURNSTILES: TurnstileState[] = [
   {
     terminalId: "TRN-MAIN-01",
     label: "Entrada principal",
-    online: true,
+    online: false,
     lastAction: "IDLE",
     lastEventIso: null,
   },
   {
     terminalId: "TRN-MAIN-02",
     label: "Entrada lateral",
-    online: true,
+    online: false,
     lastAction: "IDLE",
     lastEventIso: null,
   },
@@ -127,14 +127,30 @@ export function getAccessLog(): AccessLogEntry[] {
   );
 }
 
-export function appendAccessLog(entry: Omit<AccessLogEntry, "id">) {
+export function appendAccessLog(entry: Omit<AccessLogEntry, "id"> & { id?: string }) {
   const row: AccessLogEntry = {
     ...entry,
-    id: `ACC-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    id: entry.id ?? `ACC-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
   };
-  accessLog = [row, ...accessLog];
+  accessLog = [row, ...accessLog.filter((e) => e.id !== row.id)];
   persistAccessLog();
   return row;
+}
+
+/** Sustituye el muro de accesos por eventos reales del Gateway (sin data simulada). */
+export function replaceAccessLog(entries: AccessLogEntry[]) {
+  accessLog = [...entries].sort(
+    (a, b) =>
+      new Date(b.timestampIso).getTime() - new Date(a.timestampIso).getTime(),
+  );
+  persistAccessLog();
+  return getAccessLog();
+}
+
+/** Borra el historial local de accesos (p. ej. residuos de demos). */
+export function clearAccessLog() {
+  accessLog = [];
+  persistAccessLog();
 }
 
 export function getMembershipIncomeTotal(): number {
@@ -171,17 +187,36 @@ export function getTurnstileStates(): TurnstileState[] {
 
 export function updateTurnstile(
   terminalId: string,
-  patch: Partial<Pick<TurnstileState, "lastAction" | "lastEventIso" | "online">>,
+  patch: Partial<Pick<TurnstileState, "lastAction" | "lastEventIso" | "online" | "label">>,
 ) {
-  turnstiles = turnstiles.map((t) =>
-    t.terminalId === terminalId
-      ? {
-          ...t,
-          ...patch,
-          lastEventIso: patch.lastEventIso ?? new Date().toISOString(),
-        }
-      : t,
-  );
+  const exists = turnstiles.some((t) => t.terminalId === terminalId);
+  if (!exists) {
+    turnstiles = [
+      ...turnstiles,
+      {
+        terminalId,
+        label: patch.label || terminalId,
+        online: Boolean(patch.online),
+        lastAction: patch.lastAction ?? "IDLE",
+        lastEventIso: patch.lastEventIso ?? null,
+      },
+    ];
+  } else {
+    turnstiles = turnstiles.map((t) =>
+      t.terminalId === terminalId
+        ? {
+            ...t,
+            ...patch,
+            lastEventIso:
+              patch.lastEventIso !== undefined
+                ? patch.lastEventIso
+                : patch.lastAction
+                  ? new Date().toISOString()
+                  : t.lastEventIso,
+          }
+        : t,
+    );
+  }
   persistTurnstiles();
 }
 

@@ -9,6 +9,7 @@ export {
   ACCESS_TERMINALS,
   buildEnrollPayload,
   clientIdFromMemberId,
+  type AccessGatewayEvent,
   type AccessTerminalId,
   type FaceIdEnrollErrorBody,
   type FaceIdEnrollErrorCode,
@@ -23,6 +24,15 @@ export {
 export {
   AccessGatewayError,
   enrollFaceId,
+  fetchAccessEvents,
+  fetchGatewayActivity,
+  fetchGatewayDiagnostics,
+  pingAccessGateway,
+  reconnectEliteToGateway,
+  runGatewayDiagnostics,
   turnstileCommand,
   verifyFaceId,
+  type GatewayActivityRow,
+  type GatewayDiagnostics,
+  type GatewayReconnectResult,
 } from "./client";

@@ -3841,8 +3841,8 @@ export default function Members() {
                           Puedes registrar el rostro ahora o omitir este paso y completarlo después
                           desde Control de acceso.
                           {isAccessGatewayConfigured()
-                            ? " Gateway configurado."
-                            : " Sin Gateway: se usa mock local (desarrollo)."}
+                            ? " Gateway configurado — el socio debe mirar al SpeedFace."
+                            : " Configure el Access Gateway (ADMS) antes de enrolar."}
                         </p>
                       </div>
                     </div>

@@ -5,6 +5,7 @@ import { PosSubdomainRedirect } from "./components/PosSubdomainRedirect";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import AccessControl from "./pages/AccessControl";
+import AccessHardware from "./pages/AccessHardware";
 import Members from "./pages/Members";
 import POS from "./pages/POS";
 import Reports from "./pages/Reports";
@@ -36,6 +37,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, Component: Dashboard },
           { path: "access-control", Component: AccessControl },
+          { path: "access-hardware", Component: AccessHardware },
           { path: "members", Component: Members },
           { path: "pos", Component: POS },
           { path: "reports", Component: Reports },

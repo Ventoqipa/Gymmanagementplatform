@@ -1,9 +1,9 @@
 /**
  * Config Access Gateway (LAN del gym).
- * Vacío = Elite usa mock de enrolamiento / verify.
+ * Vacío = sin conexión a hardware (enrolamiento / verify requieren Gateway).
  *
- * Override en runtime (pruebas AnyDesk / túnel HTTPS sin rebuild):
- *   localStorage.setItem("elite_access_gateway_url", "https://xxxx.trycloudflare.com")
+ * Override en runtime (PC del gym):
+ *   localStorage.setItem("elite_access_gateway_url", "http://127.0.0.1:8787")
  *   localStorage.removeItem("elite_access_gateway_url")
  */
 const RUNTIME_KEY = "elite_access_gateway_url";
@@ -25,6 +25,14 @@ export const accessGatewayConfig = {
   enrollPath: "/v1/biometric/enroll",
   verifyPath: "/v1/biometric/verify",
   turnstilePath: "/v1/turnstile/command",
+  eventsPath: "/v1/events",
+  eventsStreamPath: "/v1/events/stream",
+  activityPath: "/v1/activity",
+  diagnosticsPath: "/v1/diagnostics",
+  diagnosticsRunPath: "/v1/diagnostics/run",
+  reconnectPath: "/v1/reconnect",
+  /** Polling del muro de accesos (ms) cuando hay Gateway. */
+  eventsPollMs: 2500,
   /** Calidad mínima sugerida (0–1). */
   minQualityScore: 0.85,
   get baseUrl(): string {

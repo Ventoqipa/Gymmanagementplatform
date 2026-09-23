@@ -11,37 +11,36 @@ Documento de referencia para **Elite Gym 24/7**: cómo controlar dispositivos ZK
 
 ## 1. Lo que hay hoy en el gimnasio (discovery)
 
-Según los reportes de visita técnica:
+Según reportes de visita técnica y operación en sitio:
 
 | Componente | Detalle |
 |------------|---------|
-| **Terminal** | ZKTeco **SpeedFace-V5L** (reconocimiento facial ZKFace VX3.9) |
-| **Red** | Ethernet cableada, LAN local |
-| **Protocolo dispositivo → servidor** | **ADMS PUSH** hacia servidor local |
-| **Software actual** | **XCore For Gym** |
-| **Servidor ADMS** | `192.168.1.22:8096` (referencia observada en sitio) |
-| **Torniquete** | Salida **Wiegand 26** desde la terminal (relé / controlador de torniquete) |
-| **Capacidad** | ~2 780 usuarios, ~2 722 rostros registrados |
+| **Terminal** | ZKTeco **SpeedFace-V5L** (reconocimiento facial) |
+| **Red** | Ethernet, LAN local |
+| **Protocolo dispositivo → servidor** | **ADMS PUSH** |
+| **Servidor ADMS** | Access Gateway Elite (`:8096` en PC LAN, ej. `192.168.1.22`) |
+| **Torniquete** | Salida **Wiegand 26** desde la terminal |
+| **Plataforma** | Elite Web (Neubox) + API Catálogo / Security / POS |
 
-### Arquitectura actual en sitio
+### Arquitectura en sitio
 
 ```
 Socio → SpeedFace-V5L (ZKTeco)
               │
               │  ADMS PUSH (LAN)
               ▼
-        Servidor XCore (192.168.1.22:8096)
+        Access Gateway (PC gym :8096 / API :8787)
               │
-              ├── Base de datos local (usuarios, rostros, eventos)
-              ├── Reglas de acceso / horarios
-              └── Señal Wiegand 26 → Torniquete (abre / mantiene cerrado)
+              ├── Eventos / fotos → Elite (Control de acceso)
+              ├── Enrolamiento ← Elite (Miembros / Access Control)
+              └── Wiegand 26 en el lector → Torniquete
 ```
 
-### Riesgos operativos (discovery)
+### Riesgos operativos
 
-- Punto único de falla: servidor local XCore.
-- Sin redundancia visible ni respaldo automático documentado.
-- Acceso dependiente de la LAN del gimnasio.
+- Punto único de falla: PC del Access Gateway / LAN del gym.
+- Sin Gateway arriba, los lectores no reportan a Elite (el match local + Wiegand puede seguir si el usuario ya está en el dispositivo).
+- Respaldo y monitoreo del servicio Gateway recomendados.
 
 ---
 
@@ -102,20 +101,22 @@ Para los flujos que necesitas, la plataforma Elite debe tener un **servicio de a
 | Capa | Responsabilidad |
 |------|-----------------|
 | **SpeedFace-V5L** | Captura rostro, identifica plantilla, envía evento al servidor ADMS, activa relé/Wiegand si se autoriza |
-| **Access Gateway** | Servidor ADMS compatible (reemplazo/evolución de XCore), orquesta reglas, llama al catálogo, registra eventos |
+| **Access Gateway** | Servidor ADMS + API Elite; orquesta enroll, eventos y estado de terminales |
 | **Catálogo Client** | Fuente de verdad: `clientID`, `dateRenewal`, `dateExpiration`, `statusID`, `faceID`, plan |
 | **Plataforma web** | Alta de socios, enrolamiento guiado, monitoreo, reportes; **no** debe abrir torniquetes directamente desde el navegador en producción |
 | **Torniquete** | Hardware; se abre con pulso Wiegand o relé de la terminal |
 
-### Relación con XCore actual
+### Relación de arquitectura
 
-Tres caminos posibles (elegir uno en proyecto):
+**Producción / prueba actual: ADMS directo** — [CUTOVER-ADMS-DIRECTO.md](./CUTOVER-ADMS-DIRECTO.md), [MANUAL-ADMIN-ACCESO.md](./MANUAL-ADMIN-ACCESO.md).
 
-1. **Reemplazo gradual:** Access Gateway implementa ADMS PUSH y sincroniza usuarios/plantillas; XCore se apaga por terminal.
-2. **Puente temporal:** XCore sigue con dispositivos; Elite recibe webhooks de XCore y valida vigencia en catálogo (doble mantenimiento).
-3. **Híbrido ZKTeco directo:** Gateway usa SDK/API ZKTeco sin XCore; Elite es el cerebro de membresías.
+```text
+SpeedFace ──ADMS :8096──► Access Gateway ──► Elite (/v1/events, enroll)
+                              │
+                              └── Catálogo (faceID vía Elite)
+```
 
-La opción **1 o 3** alinea mejor el producto Elite a largo plazo.
+El torniquete lo abre el SpeedFace por Wiegand al hacer match.
 
 ---
 
@@ -356,7 +357,7 @@ Sin este paso, el catálogo tendría `faceID` pero el lector no reconocería al 
 
 ## 6. Mapa de dispositivos y terminales
 
-Inventario confirmado en sitio (PanelZKTeco, ago 2026):
+Inventario confirmado en sitio (ago/sep 2026):
 
 | ID lógico (app) | Serial ZKTeco | Modelo | Ubicación | Salida torniquete |
 |-----------------|---------------|--------|-----------|-------------------|
@@ -482,11 +483,11 @@ data: {"id":"ACC-1","captureSnapshotUrl":"https://...","memberName":"...","resul
 
 ### ZKTeco SpeedFace — captura real
 
-En el dispositivo / XCore / ADMS:
+En el dispositivo / ADMS:
 
-1. Activar **guardar foto en verificación** (attendance photo / verify snapshot).
-2. El evento PUSH incluye imagen o referencia para descargarla vía API del dispositivo.
-3. El **Access Gateway** normaliza a un archivo y expone URL autenticada (solo staff).
+1. Activar **guardar foto en verificación** (attendance photo / verify snapshot) si se desean capturas en el monitor.
+2. El evento PUSH incluye imagen o referencia.
+3. El **Access Gateway** normaliza y expone el evento a Elite.
 
 Si no hay foto en el evento, fallback: foto de perfil del catálogo (`DocBase64`) cuando hay match.
 
@@ -531,7 +532,7 @@ Si no hay foto en el evento, fallback: foto de perfil del catálogo (`DocBase64`
 | **PUSH** | El dispositivo inicia conexión hacia el servidor (no al revés). |
 | **Wiegand 26** | Protocolo estándar entre lector y controlador de puerta/torniquete. |
 | **Plantilla facial** | Vector/template ZKFace almacenado en terminal y servidor. |
-| **Access Gateway** | Servicio propuesto que reemplaza la lógica XCore + integra Elite. |
+| **Access Gateway** | Servicio ADMS + API que integra Elite con SpeedFace. |
 | **clientID** | ID numérico en catálogo; en UI se expone como `CLI-{id}`. |
 
 ---

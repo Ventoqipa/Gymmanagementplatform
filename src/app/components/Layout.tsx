@@ -2,15 +2,18 @@ import { Outlet, NavLink, useNavigate } from "react-router";
 import {
   LayoutDashboard,
   ScanFace,
+  Cpu,
   Users,
   ShoppingCart,
   BarChart3,
   LogOut,
   Menu,
   X,
+  Loader2,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useAccessGatewayStatus } from "../context/AccessGatewayStatusContext";
 import logoImg from "../../imports/image-2.png";
 
 export default function Layout() {
@@ -18,15 +21,31 @@ export default function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const { status, checking, devicesOnline, devicesTotal, infoMessage } =
+    useAccessGatewayStatus();
 
   const handleLogout = () => {
     logout();
     navigate("/login");
     setShowLogoutModal(false);
   };
+
+  const linkLabel =
+    status === "checking"
+      ? "Comprobando…"
+      : status === "connected"
+        ? "Conectado"
+        : "Sin conexión";
+
+  const statusClass =
+    status === "checking"
+      ? "text-[#c8c8c8]"
+      : status === "connected"
+        ? "text-[#00ff00]"
+        : "text-[#e31e24]";
+
   return (
     <div className="flex h-screen bg-[#0e0e0e] text-white font-['Space_Grotesk',sans-serif]">
-      {/* Mobile Menu Button */}
       <button
         onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
         className="lg:hidden fixed top-4 left-4 z-50 bg-[#e31e24] p-2 rounded"
@@ -34,26 +53,25 @@ export default function Layout() {
         {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
       </button>
 
-      {/* Sidebar Navigation */}
-      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-[#131313] border-r border-[rgba(93,63,60,0.1)] flex flex-col transform transition-transform duration-300 ${
-        mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-      }`}>
-        {/* Logo Section */}
+      <aside
+        className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-[#131313] border-r border-[rgba(93,63,60,0.1)] flex flex-col transform transition-transform duration-300 ${
+          mobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        }`}
+      >
         <div className="p-6 border-b border-[rgba(93,63,60,0.1)]">
           <div className="flex items-center gap-3">
-            <img
-              src={logoImg}
-              alt="Elite Gym Logo"
-              className="w-12 h-12"
-            />
+            <img src={logoImg} alt="Elite Gym Logo" className="w-12 h-12" />
             <div>
-              <h1 className="font-bold text-sm tracking-tight uppercase">Elite Gym 24/7</h1>
-              <p className="text-[10px] text-[#e31e24] tracking-[1.5px] uppercase">Sistema de gestión</p>
+              <h1 className="font-bold text-sm tracking-tight uppercase">
+                Elite Gym 24/7
+              </h1>
+              <p className="text-[10px] text-[#e31e24] tracking-[1.5px] uppercase">
+                Sistema de gestión
+              </p>
             </div>
           </div>
         </div>
 
-        {/* Navigation Links */}
         <nav className="flex-1 p-4 space-y-1">
           <NavLink
             to="/"
@@ -68,7 +86,9 @@ export default function Layout() {
             }
           >
             <LayoutDashboard size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">Inicio</span>
+            <span className="font-bold text-xs tracking-wide uppercase">
+              Inicio
+            </span>
           </NavLink>
 
           <NavLink
@@ -83,7 +103,9 @@ export default function Layout() {
             }
           >
             <ScanFace size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">Control de acceso</span>
+            <span className="font-bold text-xs tracking-wide uppercase">
+              Control de acceso
+            </span>
           </NavLink>
 
           <NavLink
@@ -98,7 +120,9 @@ export default function Layout() {
             }
           >
             <Users size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">Miembros</span>
+            <span className="font-bold text-xs tracking-wide uppercase">
+              Miembros
+            </span>
           </NavLink>
 
           <NavLink
@@ -113,7 +137,9 @@ export default function Layout() {
             }
           >
             <ShoppingCart size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">Tienda</span>
+            <span className="font-bold text-xs tracking-wide uppercase">
+              Tienda
+            </span>
           </NavLink>
 
           <NavLink
@@ -128,35 +154,83 @@ export default function Layout() {
             }
           >
             <BarChart3 size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">Reportes</span>
+            <span className="font-bold text-xs tracking-wide uppercase">
+              Reportes
+            </span>
+          </NavLink>
+
+          <NavLink
+            to="/access-hardware"
+            onClick={() => setMobileMenuOpen(false)}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-4 py-3 rounded transition-colors ${
+                isActive
+                  ? "bg-[#e31e24] text-white"
+                  : "text-[#808080] hover:bg-[#1a1a1a] hover:text-[#e5e2e1]"
+              }`
+            }
+          >
+            <Cpu size={18} />
+            <div className="flex flex-col min-w-0">
+              <span className="font-bold text-xs tracking-wide uppercase">
+                Panel
+              </span>
+              <span
+                className={`text-[9px] font-bold uppercase tracking-wide flex items-center gap-1 ${statusClass}`}
+              >
+                {status === "checking" || checking ? (
+                  <Loader2 size={10} className="animate-spin" />
+                ) : (
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      status === "connected" ? "bg-[#00ff00]" : "bg-[#e31e24]"
+                    }`}
+                  />
+                )}
+                {linkLabel}
+              </span>
+            </div>
           </NavLink>
         </nav>
 
-        {/* System Status Footer */}
         <div className="p-4 border-t border-[rgba(93,63,60,0.1)] space-y-3">
           <div className="space-y-2">
             <div className="flex items-center justify-between text-[10px]">
-              <span className="text-[#808080] uppercase tracking-[1px]">Estatus del sistema</span>
-              <span className="text-[#00ff00] font-bold">ONLINE</span>
+              <span className="text-[#808080] uppercase tracking-[1px]">
+                Acceso
+              </span>
+              <span
+                className={`font-bold uppercase flex items-center gap-1 ${statusClass}`}
+              >
+                {(status === "checking" || checking) && (
+                  <Loader2 size={10} className="animate-spin" />
+                )}
+                {linkLabel}
+              </span>
             </div>
             <div className="flex items-center justify-between text-[10px]">
-              <span className="text-[#808080] uppercase tracking-[1px]">Dispositivos</span>
-              <span className="text-[#e5e2e1] font-bold">1/3 ACTIVE</span>
+              <span className="text-[#808080] uppercase tracking-[1px]">
+                Lectores
+              </span>
+              <span className="text-[#e5e2e1] font-bold">
+                {devicesTotal === 0 ? "—" : `${devicesOnline}/${devicesTotal}`}
+              </span>
             </div>
+            <p className="text-[9px] text-[#5a5a5a] leading-snug">{infoMessage}</p>
           </div>
 
-          {/* Logout Button */}
           <button
             onClick={() => setShowLogoutModal(true)}
             className="w-full flex items-center gap-3 px-4 py-3 rounded bg-[#1a1a1a] text-[#e31e24] hover:bg-[#e31e24] hover:text-white transition-colors"
           >
             <LogOut size={18} />
-            <span className="font-bold text-xs tracking-wide uppercase">Cerrar Sesión</span>
+            <span className="font-bold text-xs tracking-wide uppercase">
+              Cerrar Sesión
+            </span>
           </button>
         </div>
       </aside>
 
-      {/* Logout Confirmation Modal */}
       {showLogoutModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-[#131313] border border-[rgba(93,63,60,0.2)] p-6 md:p-8 max-w-md w-full">
@@ -190,7 +264,6 @@ export default function Layout() {
         </div>
       )}
 
-      {/* Mobile Overlay */}
       {mobileMenuOpen && (
         <div
           className="lg:hidden fixed inset-0 bg-black/50 z-30"
@@ -198,7 +271,6 @@ export default function Layout() {
         />
       )}
 
-      {/* Main Content Area */}
       <main className="flex-1 overflow-auto lg:ml-0">
         <Outlet />
       </main>
