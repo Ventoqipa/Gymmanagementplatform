@@ -1,6 +1,7 @@
 # Instructivo de acceso (resumen)
 
 **Checklist producción:** [CHECKLIST-PRODUCCION.md](./CHECKLIST-PRODUCCION.md)  
+**Manual gerente (PDF):** [MANUAL-GERENTE-CONEXION.pdf](./MANUAL-GERENTE-CONEXION.pdf) · [versión HTML](./MANUAL-GERENTE-CONEXION.html)  
 **Manual completo:** [MANUAL-ADMIN-ACCESO.md](./MANUAL-ADMIN-ACCESO.md)
 
 En Elite abra **Panel**:

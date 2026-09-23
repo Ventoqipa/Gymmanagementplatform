@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Manual del gerente — Elite Gym 24/7</title>
+  <style>
+    @page {
+      size: Letter;
+      margin: 18mm 16mm 18mm 16mm;
+    }
+    :root {
+      --red: #e31e24;
+      --ink: #1a1a1a;
+      --muted: #5a5a5a;
+      --line: #e8e0df;
+      --paper: #ffffff;
+      --soft: #f7f4f3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      font-size: 11pt;
+      line-height: 1.45;
+    }
+    .page {
+      page-break-after: always;
+      min-height: 250mm;
+      padding: 0;
+      position: relative;
+    }
+    .page:last-child { page-break-after: auto; }
+    h1, h2, h3 { margin: 0 0 0.4em; letter-spacing: -0.02em; }
+    h1 { font-size: 28pt; line-height: 1.1; }
+    h2 {
+      font-size: 16pt;
+      color: var(--red);
+      border-bottom: 2px solid var(--red);
+      padding-bottom: 6px;
+      margin-top: 0;
+      margin-bottom: 14px;
+    }
+    h3 { font-size: 12pt; margin-top: 16px; }
+    p { margin: 0 0 10px; color: var(--ink); }
+    .muted { color: var(--muted); }
+    .lead { font-size: 13pt; color: var(--muted); max-width: 42em; }
+    ul, ol { margin: 0 0 12px; padding-left: 1.25em; }
+    li { margin-bottom: 6px; }
+    .cover {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 250mm;
+      background:
+        linear-gradient(160deg, #120f0f 0%, #2a1515 45%, #0e0e0e 100%);
+      color: #fff;
+      padding: 28mm 18mm;
+      margin: -18mm -16mm;
+      width: calc(100% + 32mm);
+    }
+    .cover-brand {
+      font-size: 12pt;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--red);
+      font-weight: 700;
+    }
+    .cover h1 { color: #fff; font-size: 34pt; margin-top: 18px; }
+    .cover .lead { color: #c8c0bf; }
+    .cover-meta {
+      border-top: 1px solid rgba(255,255,255,0.15);
+      padding-top: 16px;
+      font-size: 10pt;
+      color: #a8a0a0;
+    }
+    .badge {
+      display: inline-block;
+      background: var(--red);
+      color: #fff;
+      font-size: 9pt;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 6px 10px;
+      margin-bottom: 18px;
+    }
+    .illus {
+      display: block;
+      width: 100%;
+      max-width: 520px;
+      margin: 14px auto 18px;
+    }
+    .illus-wide { max-width: 100%; }
+    .card {
+      background: var(--soft);
+      border: 1px solid var(--line);
+      padding: 14px 16px;
+      margin: 12px 0;
+    }
+    .steps {
+      counter-reset: step;
+      list-style: none;
+      padding: 0;
+    }
+    .steps li {
+      counter-increment: step;
+      position: relative;
+      padding: 12px 12px 12px 54px;
+      border: 1px solid var(--line);
+      margin-bottom: 10px;
+      background: #fff;
+    }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--red);
+      color: #fff;
+      font-weight: 800;
+      font-size: 12pt;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 28px;
+      text-align: center;
+    }
+    .steps strong { display: block; margin-bottom: 2px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 16px;
+      font-size: 10.5pt;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--soft);
+      font-size: 9pt;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .warn {
+      border-left: 4px solid var(--red);
+      background: #fff5f5;
+      padding: 10px 12px;
+      margin: 12px 0;
+    }
+    .ok {
+      border-left: 4px solid #1a9c3c;
+      background: #f3faf5;
+      padding: 10px 12px;
+      margin: 12px 0;
+    }
+    .footer-note {
+      margin-top: 28px;
+      font-size: 9pt;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .mini-title {
+      font-size: 9pt;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--red);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- PORTADA -->
+  <section class="page cover">
+    <div>
+      <div class="badge">Manual de usuario</div>
+      <div class="cover-brand">Elite Gym 24/7</div>
+      <h1>Cómo conectar<br/>y empezar a usar<br/>la plataforma</h1>
+      <p class="lead" style="margin-top:18px">
+        Guía práctica para el gerente o responsable del gimnasio.
+        Explica, en orden, cómo dejar listos los lectores de acceso
+        y comenzar a operar Elite día a día.
+      </p>
+    </div>
+    <div class="cover-meta">
+      <div>Sitio: https://elitegym247.tanosi.com.mx/</div>
+      <div>Público: Gerencia / recepción · Sin conocimientos técnicos avanzados</div>
+      <div>Versión: acceso ADMS directo (sin XCore)</div>
+    </div>
+  </section>
+
+  <!-- QUÉ ES -->
+  <section class="page">
+    <h2>1. ¿Qué es la plataforma?</h2>
+    <p>
+      <strong>Elite</strong> es el sistema web del gimnasio para socios, Face ID,
+      accesos y operación diaria. Los <strong>lectores de rostro</strong> (SpeedFace)
+      abren el torniquete y envían cada visita a Elite.
+    </p>
+
+    <svg class="illus illus-wide" viewBox="0 0 720 220" role="img" aria-label="Diagrama del flujo de acceso">
+      <rect width="720" height="220" fill="#f7f4f3"/>
+      <!-- Socio -->
+      <circle cx="70" cy="90" r="28" fill="#e31e24"/>
+      <text x="70" y="96" text-anchor="middle" fill="#fff" font-size="14" font-family="Arial" font-weight="700">Socio</text>
+      <text x="70" y="145" text-anchor="middle" fill="#5a5a5a" font-size="12" font-family="Arial">Mira al lector</text>
+      <!-- Flecha -->
+      <path d="M110 90 H170" stroke="#c9b8b6" stroke-width="3"/>
+      <polygon points="170,84 186,90 170,96" fill="#c9b8b6"/>
+      <!-- Lector -->
+      <rect x="196" y="52" width="110" height="76" rx="8" fill="#1a1a1a"/>
+      <rect x="214" y="68" width="74" height="44" rx="4" fill="#333"/>
+      <circle cx="251" cy="90" r="12" fill="#e31e24"/>
+      <text x="251" y="150" text-anchor="middle" fill="#5a5a5a" font-size="12" font-family="Arial">SpeedFace</text>
+      <!-- Flecha split -->
+      <path d="M316 90 H370" stroke="#c9b8b6" stroke-width="3"/>
+      <polygon points="370,84 386,90 370,96" fill="#c9b8b6"/>
+      <!-- Torniquete -->
+      <rect x="396" y="40" width="120" height="50" rx="6" fill="#fff" stroke="#e31e24" stroke-width="2"/>
+      <text x="456" y="70" text-anchor="middle" fill="#e31e24" font-size="13" font-family="Arial" font-weight="700">Torniquete</text>
+      <text x="456" y="108" text-anchor="middle" fill="#5a5a5a" font-size="11" font-family="Arial">Abre al reconocer</text>
+      <!-- PC / Elite -->
+      <rect x="396" y="128" width="120" height="50" rx="6" fill="#fff" stroke="#1a1a1a" stroke-width="2"/>
+      <text x="456" y="158" text-anchor="middle" fill="#1a1a1a" font-size="13" font-family="Arial" font-weight="700">Elite (web)</text>
+      <text x="456" y="198" text-anchor="middle" fill="#5a5a5a" font-size="11" font-family="Arial">Ve el acceso en pantalla</text>
+      <path d="M370 90 V153 H396" stroke="#c9b8b6" stroke-width="3" fill="none"/>
+      <!-- Gateway label -->
+      <rect x="540" y="70" width="150" height="80" rx="8" fill="#1a1a1a"/>
+      <text x="615" y="102" text-anchor="middle" fill="#e31e24" font-size="12" font-family="Arial" font-weight="700">PC del gym</text>
+      <text x="615" y="124" text-anchor="middle" fill="#fff" font-size="12" font-family="Arial">Access Gateway</text>
+      <text x="615" y="144" text-anchor="middle" fill="#aaa" font-size="10" font-family="Arial">Puente lector ↔ Elite</text>
+    </svg>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="mini-title">Lo que usted usa</div>
+        <ul>
+          <li>Sitio <strong>Elite</strong> en el navegador</li>
+          <li>Menú <strong>Panel</strong> para ver si hay conexión</li>
+          <li><strong>Control de acceso</strong> para visitas y Face ID</li>
+          <li><strong>Miembros</strong> e <strong>Inicio</strong> para operación</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="mini-title">Lo que debe estar listo</div>
+        <ul>
+          <li>PC de recepción encendido</li>
+          <li>Programa Access Gateway activo</li>
+          <li>Lectores apuntando a ese PC</li>
+          <li>XCore / software viejo <strong>apagado</strong></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-note">Elite Gym 24/7 · Manual del gerente · Conexión y primer uso</div>
+  </section>
+
+  <!-- ORDEN -->
+  <section class="page">
+    <h2>2. Orden de conexión (importante)</h2>
+    <p class="muted">Siga estos pasos en este orden. Si se salta el cierre de XCore, el sistema nuevo no podrá arrancar.</p>
+
+    <svg class="illus illus-wide" viewBox="0 0 720 130" role="img" aria-label="Orden de los seis pasos">
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="#e31e24"/>
+        </marker>
+      </defs>
+      <rect width="720" height="130" fill="#fff"/>
+      <!-- steps -->
+      <g font-family="Arial" font-size="11">
+        <rect x="8" y="30" width="100" height="54" rx="8" fill="#e31e24"/>
+        <text x="58" y="52" text-anchor="middle" fill="#fff" font-weight="700">1</text>
+        <text x="58" y="70" text-anchor="middle" fill="#fff">Publicar</text>
+        <text x="58" y="100" text-anchor="middle" fill="#5a5a5a" font-size="10">Elite web</text>
+
+        <line x1="112" y1="57" x2="128" y2="57" stroke="#e31e24" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <rect x="132" y="30" width="100" height="54" rx="8" fill="#1a1a1a"/>
+        <text x="182" y="52" text-anchor="middle" fill="#e31e24" font-weight="700">2</text>
+        <text x="182" y="70" text-anchor="middle" fill="#fff">Cerrar XCore</text>
+        <text x="182" y="100" text-anchor="middle" fill="#5a5a5a" font-size="10">Libera puerto</text>
+
+        <line x1="236" y1="57" x2="252" y2="57" stroke="#e31e24" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <rect x="256" y="30" width="100" height="54" rx="8" fill="#1a1a1a"/>
+        <text x="306" y="52" text-anchor="middle" fill="#e31e24" font-weight="700">3</text>
+        <text x="306" y="70" text-anchor="middle" fill="#fff">Gateway</text>
+        <text x="306" y="100" text-anchor="middle" fill="#5a5a5a" font-size="10">PC del gym</text>
+
+        <line x1="360" y1="57" x2="376" y2="57" stroke="#e31e24" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <rect x="380" y="30" width="100" height="54" rx="8" fill="#1a1a1a"/>
+        <text x="430" y="52" text-anchor="middle" fill="#e31e24" font-weight="700">4</text>
+        <text x="430" y="70" text-anchor="middle" fill="#fff">SpeedFace</text>
+        <text x="430" y="100" text-anchor="middle" fill="#5a5a5a" font-size="10">IP del PC</text>
+
+        <line x1="484" y1="57" x2="500" y2="57" stroke="#e31e24" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <rect x="504" y="30" width="100" height="54" rx="8" fill="#1a1a1a"/>
+        <text x="554" y="52" text-anchor="middle" fill="#e31e24" font-weight="700">5</text>
+        <text x="554" y="70" text-anchor="middle" fill="#fff">Reconectar</text>
+        <text x="554" y="100" text-anchor="middle" fill="#5a5a5a" font-size="10">Menú Panel</text>
+
+        <line x1="608" y1="57" x2="624" y2="57" stroke="#e31e24" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <rect x="628" y="30" width="84" height="54" rx="8" fill="#1a9c3c"/>
+        <text x="670" y="52" text-anchor="middle" fill="#fff" font-weight="700">6</text>
+        <text x="670" y="70" text-anchor="middle" fill="#fff">Usar</text>
+        <text x="670" y="100" text-anchor="middle" fill="#5a5a5a" font-size="10">Operar</text>
+      </g>
+    </svg>
+
+    <ol class="steps">
+      <li>
+        <strong>Publicar Elite</strong>
+        El equipo técnico sube el sitio a internet. Usted solo confirma que al abrir
+        https://elitegym247.tanosi.com.mx/ aparece el menú <strong>Panel</strong>.
+      </li>
+      <li>
+        <strong>Desconectar XCore</strong>
+        Cierre XCore / Panel ZKTeco y cualquier programa viejo de acceso.
+        No deben quedar activos: solo puede haber un servidor de lectores.
+      </li>
+      <li>
+        <strong>Activar Access Gateway</strong>
+        En el PC del gym, ejecute una vez <code>install-autostart.bat</code>
+        (o <code>start-gateway.bat</code> para una prueba).
+      </li>
+      <li>
+        <strong>Configurar lectores</strong>
+        En cada SpeedFace, servidor = IP del PC del gym, puerto = 8096.
+      </li>
+      <li>
+        <strong>Reconectar en Elite</strong>
+        En ese mismo PC: login → <strong>Panel → Reconectar</strong> → debe decir Conectado.
+      </li>
+      <li>
+        <strong>Empezar a usar</strong>
+        Alta de socios, Face ID, monitoreo de accesos y operación diaria.
+      </li>
+    </ol>
+
+    <div class="warn">
+      <strong>Atención:</strong> XCore y el Access Gateway nuevo no pueden estar
+      encendidos al mismo tiempo. Si el Gateway dice “puerto ocupado”, vuelva al paso 2.
+    </div>
+
+    <div class="footer-note">Elite Gym 24/7 · Manual del gerente · Conexión y primer uso</div>
+  </section>
+
+  <!-- PASO A PASO CONEXIÓN -->
+  <section class="page">
+    <h2>3. Conectar por primera vez (en el PC del gym)</h2>
+
+    <h3>A. Cerrar el sistema anterior (XCore)</h3>
+    <ul>
+      <li>Cierre la ventana de XCore / Panel ZKTeco.</li>
+      <li>Si Windows lo abre solo al encender, quítelo del inicio automático.</li>
+      <li>Confirme que ningún programa viejo de acceso sigue abierto.</li>
+    </ul>
+
+    <svg class="illus" viewBox="0 0 520 140" role="img" aria-label="Cerrar XCore antes del Gateway">
+      <rect width="520" height="140" fill="#f7f4f3"/>
+      <rect x="40" y="35" width="160" height="70" rx="8" fill="#fff" stroke="#e31e24" stroke-width="2"/>
+      <text x="120" y="65" text-anchor="middle" fill="#e31e24" font-size="14" font-family="Arial" font-weight="700">XCore</text>
+      <text x="120" y="86" text-anchor="middle" fill="#5a5a5a" font-size="12" font-family="Arial">Cerrar / apagar</text>
+      <line x1="40" y1="40" x2="200" y2="100" stroke="#e31e24" stroke-width="3"/>
+      <line x1="200" y1="40" x2="40" y2="100" stroke="#e31e24" stroke-width="3"/>
+      <path d="M220 70 H280" stroke="#999" stroke-width="3"/>
+      <polygon points="280,64 296,70 280,76" fill="#999"/>
+      <rect x="310" y="35" width="170" height="70" rx="8" fill="#1a1a1a"/>
+      <text x="395" y="65" text-anchor="middle" fill="#1a9c3c" font-size="14" font-family="Arial" font-weight="700">Gateway Elite</text>
+      <text x="395" y="86" text-anchor="middle" fill="#ccc" font-size="12" font-family="Arial">Listo para arrancar</text>
+    </svg>
+
+    <h3>B. Activar el Access Gateway</h3>
+    <ol>
+      <li>Abra la carpeta <strong>access-gateway</strong> en el PC de recepción.</li>
+      <li>Ejecute <strong>install-autostart.bat</strong> una sola vez (si Windows lo pide, acepte como administrador).</li>
+      <li>Compruebe en el navegador: <strong>http://127.0.0.1:8787/health</strong> — debe verse algo con <em>ok</em>.</li>
+    </ol>
+    <div class="ok">
+      Con el arranque automático, <strong>no hace falta</strong> abrir un archivo .bat cada mañana.
+      Al iniciar sesión en Windows, el Gateway debería levantarse solo.
+    </div>
+
+    <h3>C. Configurar cada lector SpeedFace</h3>
+    <table>
+      <thead>
+        <tr><th>Campo en el lector</th><th>Valor</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Servidor / Cloud / ADMS</td><td>IP del PC del gym (ejemplo: 192.168.1.22)</td></tr>
+        <tr><td>Puerto</td><td>8096</td></tr>
+      </tbody>
+    </table>
+    <p class="muted">Entrada principal y entrada lateral deben apuntar a la misma IP del PC.</p>
+
+    <h3>D. Conectar Elite</h3>
+    <ol>
+      <li>En <strong>ese mismo PC</strong>, abra https://elitegym247.tanosi.com.mx/ e inicie sesión.</li>
+      <li>Menú izquierdo → <strong>Panel</strong>.</li>
+      <li>Pulse <strong>Reconectar</strong>.</li>
+      <li>Debe verse <strong>Conectado</strong> y los lectores en verde (o con señal).</li>
+    </ol>
+
+    <div class="footer-note">Elite Gym 24/7 · Manual del gerente · Conexión y primer uso</div>
+  </section>
+
+  <!-- USO DIARIO -->
+  <section class="page">
+    <h2>4. Empezar a usar la plataforma (día a día)</h2>
+
+    <svg class="illus illus-wide" viewBox="0 0 720 160" role="img" aria-label="Menú principal de Elite">
+      <rect width="720" height="160" fill="#0e0e0e"/>
+      <rect x="20" y="20" width="140" height="120" fill="#131313"/>
+      <text x="40" y="48" fill="#e31e24" font-size="11" font-family="Arial" font-weight="700">MENÚ</text>
+      <text x="40" y="72" fill="#e5e2e1" font-size="11" font-family="Arial">Inicio</text>
+      <text x="40" y="92" fill="#e5e2e1" font-size="11" font-family="Arial">Control acceso</text>
+      <text x="40" y="112" fill="#e5e2e1" font-size="11" font-family="Arial">Miembros</text>
+      <text x="40" y="132" fill="#808080" font-size="11" font-family="Arial">… Panel</text>
+      <rect x="180" y="28" width="520" height="104" fill="#1a1a1a" rx="4"/>
+      <text x="200" y="60" fill="#e31e24" font-size="12" font-family="Arial" font-weight="700">PANEL</text>
+      <text x="200" y="88" fill="#00ff00" font-size="18" font-family="Arial" font-weight="700">Conectado</text>
+      <text x="200" y="114" fill="#808080" font-size="12" font-family="Arial">Lectores · Actividad · Reconectar</text>
+    </svg>
+
+    <h3>Cada mañana (o al abrir el turno)</h3>
+    <ol>
+      <li>Encienda el PC de recepción (el Gateway debería arrancar solo).</li>
+      <li>Abra Elite e inicie sesión.</li>
+      <li>Vaya a <strong>Panel</strong>: si no dice Conectado, pulse <strong>Reconectar</strong>.</li>
+      <li>Revise que los lectores estén conectados.</li>
+    </ol>
+
+    <h3>Alta de un socio nuevo</h3>
+    <ol>
+      <li><strong>Miembros → Nuevo miembro</strong>.</li>
+      <li>Complete datos y cobro / membresía.</li>
+      <li>En Face ID: elija el lector, pulse registrar y pida al socio que mire de frente al SpeedFace.</li>
+      <li>Espere la confirmación en pantalla.</li>
+    </ol>
+
+    <h3>Ver quién entra</h3>
+    <p>
+      Abra <strong>Control de acceso</strong>. Ahí verá el monitor en vivo con visitas reales
+      (no simuladas). También puede enrolar un rostro si el socio ya estaba dado de alta sin Face ID.
+    </p>
+
+    <h3>Inicio</h3>
+    <p>
+      La pantalla <strong>Inicio</strong> muestra el resumen del día y la lista de clientes
+      del catálogo (se carga al abrir).
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>Pantalla</th><th>Para qué sirve</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Inicio</td><td>Resumen del día y clientes</td></tr>
+        <tr><td>Control de acceso</td><td>Visitas en vivo, Face ID, estado de lectores</td></tr>
+        <tr><td>Miembros</td><td>Altas, renovaciones, expediente</td></tr>
+        <tr><td>Tienda</td><td>Ventas POS</td></tr>
+        <tr><td>Reportes</td><td>Informes de operación</td></tr>
+        <tr><td>Panel</td><td>Conexión, dispositivos y actividad del sistema de acceso</td></tr>
+      </tbody>
+    </table>
+
+    <div class="footer-note">Elite Gym 24/7 · Manual del gerente · Conexión y primer uso</div>
+  </section>
+
+  <!-- PRUEBAS Y PROBLEMAS -->
+  <section class="page">
+    <h2>5. Primera prueba (después de conectar)</h2>
+    <table>
+      <thead>
+        <tr><th>#</th><th>Qué hacer</th><th>Qué debe pasar</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>Un socio con Face ID pasa por el lector</td><td>Aparece en Control de acceso</td></tr>
+        <tr><td>2</td><td>Observar el torniquete</td><td>Abre al reconocer</td></tr>
+        <tr><td>3</td><td>Registrar Face ID a un socio de prueba</td><td>Confirmación en Elite y rostro en el lector</td></tr>
+        <tr><td>4</td><td>Abrir Inicio</td><td>Se listan clientes del catálogo</td></tr>
+      </tbody>
+    </table>
+
+    <h2>6. Si algo no funciona</h2>
+    <table>
+      <thead>
+        <tr><th>Qué ve</th><th>Qué hacer</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Panel: Sin conexión</td>
+          <td>¿PC encendido? ¿Gateway activo? Pulse Reconectar. Si falla, reinicie el PC.</td>
+        </tr>
+        <tr>
+          <td>Lectores desconectados</td>
+          <td>Revise cable de red del SpeedFace e IP/puerto 8096 hacia el PC.</td>
+        </tr>
+        <tr>
+          <td>Puerto 8096 ocupado</td>
+          <td>XCore u otro programa sigue abierto → ciérrelo y vuelva a activar el Gateway.</td>
+        </tr>
+        <tr>
+          <td>No aparece el menú Panel</td>
+          <td>Falta publicar la versión nueva del sitio (avisar a soporte / TI).</td>
+        </tr>
+        <tr>
+          <td>Socio no entra</td>
+          <td>¿Tiene Face ID? ¿Membresía vigente? Re-enrolar si hace falta.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="card">
+      <div class="mini-title">Contacto soporte</div>
+      <p style="margin:0">Al reportar un problema, indique:</p>
+      <ul style="margin-bottom:0">
+        <li>Hora aproximada</li>
+        <li>ID del miembro (CLI-…)</li>
+        <li>Captura de <strong>Panel</strong> o <strong>Control de acceso</strong></li>
+      </ul>
+    </div>
+
+    <h2>7. Resumen rápido</h2>
+    <div class="ok">
+      <ol style="margin:0;padding-left:1.2em">
+        <li>Cerrar XCore</li>
+        <li>Gateway activo en el PC</li>
+        <li>Lectores → IP del PC, puerto 8096</li>
+        <li>Elite → Panel → Reconectar</li>
+        <li>Operar: Miembros, Face ID, Control de acceso</li>
+      </ol>
+    </div>
+
+    <p class="footer-note" style="margin-top:40px">
+      Elite Gym 24/7 · Manual del gerente · Conexión y primer uso
+    </p>
+  </section>
+
+</body>
+</html>
