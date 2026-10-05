@@ -9,7 +9,11 @@ import {
   XCircle,
   UserPlus,
   Camera,
+  Search,
+  X,
+  AlertTriangle,
 } from "lucide-react";
+import { useLocation } from "react-router";
 import { toast } from "sonner";
 import {
   appendAccessEnrollment,
@@ -33,14 +37,65 @@ import {
   verifyFaceId,
   type AccessGatewayEvent,
 } from "../core/accessGateway";
-import { clientIdFromMemberId, persistFaceIdUseCase } from "../core/catalog";
-import { loadMembers, saveMembers } from "../lib/membersStore";
+import {
+  clientIdFromMemberId,
+  listClientsUseCase,
+  persistFaceIdUseCase,
+} from "../core/catalog";
+import { loadMembers, saveMembers, type Member } from "../lib/membersStore";
+import { useAuth } from "../context/AuthContext";
 import { buildUnknownCaptureDataUrl } from "../lib/accessCaptureImage";
 import { useAccessGatewayStatus } from "../context/AccessGatewayStatusContext";
 
 const GYM_GATEWAY_URL = "http://127.0.0.1:8787";
 
 type EnrollPhase = "idle" | "capturing" | "registering";
+
+const MAX_MEMBER_SUGGESTIONS = 8;
+
+function normalizeSearch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function memberDisplayName(m: Pick<Member, "firstName" | "lastName">): string {
+  return `${m.firstName} ${m.lastName}`.replace(/\s+/g, " ").trim();
+}
+
+function isMembershipExpired(m: Pick<Member, "renewalDate">): boolean {
+  if (!m.renewalDate) return false;
+  const end = new Date(m.renewalDate + "T12:00:00");
+  end.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return end < today;
+}
+
+function searchMembers(members: Member[], query: string): Member[] {
+  const q = normalizeSearch(query);
+  if (!q) return [];
+  const idDigits = q.match(/^(?:cli[-_\s]?)?(\d+)$/)?.[1];
+  const exact: Member[] = [];
+  const rest: Member[] = [];
+  for (const m of members) {
+    const memberDigits = m.id.match(/(\d+)$/)?.[1];
+    if (idDigits && memberDigits === idDigits) {
+      exact.push(m);
+      continue;
+    }
+    const name = normalizeSearch(memberDisplayName(m));
+    if (
+      (idDigits && memberDigits?.startsWith(idDigits)) ||
+      (!idDigits && (name.includes(q) || m.id.toLowerCase().includes(q)))
+    ) {
+      rest.push(m);
+    }
+  }
+  return [...exact, ...rest].slice(0, MAX_MEMBER_SUGGESTIONS);
+}
 
 function gatewayEventToLog(evt: AccessGatewayEvent): AccessLogEntry {
   return {
@@ -77,8 +132,14 @@ export default function AccessControl() {
   const [eventsNote, setEventsNote] = useState("Cargando accesos reales…");
   const initialEventsLoad = useRef(true);
 
-  const [enrollMemberId, setEnrollMemberId] = useState("");
-  const [enrollName, setEnrollName] = useState("");
+  const { isAuthenticated } = useAuth();
+  const location = useLocation();
+  const enrollSectionRef = useRef<HTMLDivElement>(null);
+  const [members, setMembers] = useState<Member[]>(() => loadMembers());
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [enrollQuery, setEnrollQuery] = useState("");
+  const [enrollMember, setEnrollMember] = useState<Member | null>(null);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [enrollTerminal, setEnrollTerminal] = useState("TRN-MAIN-01");
   const [enrollPhase, setEnrollPhase] = useState<EnrollPhase>("idle");
   const [enrollBusy, setEnrollBusy] = useState(false);
@@ -96,6 +157,56 @@ export default function AccessControl() {
     const rate = total === 0 ? 100 : Math.round((granted / total) * 1000) / 10;
     return { granted, denied, total, rate };
   }, [log]);
+
+  const memberSuggestions = useMemo(
+    () => (enrollMember ? [] : searchMembers(members, enrollQuery)),
+    [members, enrollQuery, enrollMember],
+  );
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    setMembersLoading(true);
+    void listClientsUseCase().then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setMembers(result.members);
+        saveMembers(result.members);
+      }
+      setMembersLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
+
+  const requestedEnrollId = (location.state as { enrollMemberId?: string } | null)
+    ?.enrollMemberId;
+
+  const handledEnrollRequest = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!requestedEnrollId || handledEnrollRequest.current === requestedEnrollId) return;
+    const target = members.find(
+      (m) => m.id.toUpperCase() === requestedEnrollId.toUpperCase(),
+    );
+    if (!target) return;
+    handledEnrollRequest.current = requestedEnrollId;
+    setEnrollMember(target);
+    setEnrollQuery("");
+    enrollSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [requestedEnrollId, members]);
+
+  const selectEnrollMember = (m: Member) => {
+    setEnrollMember(m);
+    setEnrollQuery("");
+    setSuggestionsOpen(false);
+  };
+
+  const clearEnrollMember = () => {
+    setEnrollMember(null);
+    setEnrollQuery("");
+  };
 
   const liveFeed = useMemo(() => log.slice(0, 12), [log]);
   const latestAccess = liveFeed[0] ?? null;
@@ -297,11 +408,23 @@ export default function AccessControl() {
       });
       return;
     }
-    const mid = enrollMemberId.trim().toUpperCase();
-    if (!mid) {
-      toast.error("Indique el ID de miembro.", { description: "Ejemplo: CLI-123" });
+    const member = enrollMember;
+    if (!member) {
+      toast.error("Seleccione un miembro.", {
+        description: "Busque por número de cliente o por nombre.",
+      });
       return;
     }
+    const display = memberDisplayName(member) || member.id;
+    if (
+      member.faceIdEnrolled &&
+      !window.confirm(
+        `${display} ya tiene un rostro registrado. ¿Desea reemplazarlo con uno nuevo?`,
+      )
+    ) {
+      return;
+    }
+    const mid = member.id.trim().toUpperCase();
     setEnrollBusy(true);
     setEnrollPhase("capturing");
     await new Promise((r) => setTimeout(r, 400));
@@ -316,10 +439,9 @@ export default function AccessControl() {
       const res = await enrollFaceId({
         terminalId: enrollTerminal,
         memberId: mid,
-        displayName: enrollName.trim() || undefined,
+        displayName: display,
         clientId: clientId && clientId > 0 ? clientId : undefined,
       });
-      const display = enrollName.trim() || mid;
       const rec = appendAccessEnrollment({
         memberId: mid,
         displayName: display,
@@ -329,32 +451,28 @@ export default function AccessControl() {
       });
       setRecentEnrollments((prev) => [rec, ...prev].slice(0, 12));
 
-      if (clientId && clientId > 0) {
-        const local = loadMembers().find((m) => m.id.toUpperCase() === mid);
-        if (local) {
-          const catalog = await persistFaceIdUseCase({
-            member: local,
-            templateId: res.templateId,
-            pin: res.pin,
-          });
-          if (catalog.ok) {
-            const next = loadMembers().map((m) =>
-              m.id.toUpperCase() === mid
-                ? {
-                    ...catalog.member,
-                    faceIdTemplateId: res.templateId,
-                    faceIdEnrolled: true,
-                  }
-                : m,
-            );
-            saveMembers(next);
-          } else {
-            toast.warning("Enrolado en el lector; falta guardar faceID en catálogo", {
-              description: catalog.message,
-              duration: 10_000,
-            });
-          }
-        }
+      const catalog = await persistFaceIdUseCase({
+        member,
+        templateId: res.templateId,
+        pin: res.pin,
+      });
+      const updated: Member = {
+        ...(catalog.ok ? catalog.member : member),
+        faceIdTemplateId: res.templateId,
+        faceIdEnrolled: true,
+      };
+      const base = loadMembers();
+      const next = base.some((m) => m.id.toUpperCase() === mid)
+        ? base.map((m) => (m.id.toUpperCase() === mid ? updated : m))
+        : [updated, ...base];
+      saveMembers(next);
+      setMembers(next);
+      setEnrollMember(null);
+      if (!catalog.ok) {
+        toast.warning("Rostro guardado en el lector, pero no en el sistema", {
+          description: `${catalog.message} Vuelva a intentarlo más tarde.`,
+          duration: 10_000,
+        });
       }
 
       toast.success("Rostro registrado", {
@@ -711,7 +829,10 @@ export default function AccessControl() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 md:gap-6 mb-6">
-        <div className="bg-[#2a2a2a] border border-[rgba(93,63,60,0.1)] p-6">
+        <div
+          ref={enrollSectionRef}
+          className="bg-[#2a2a2a] border border-[rgba(93,63,60,0.1)] p-6 scroll-mt-4"
+        >
           <div className="flex items-center gap-2 mb-2">
             <UserPlus className="text-[#e31e24]" size={22} />
             <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
@@ -722,36 +843,135 @@ export default function AccessControl() {
             Nuevo rostro FaceID
           </h2>
           <p className="text-[#808080] text-[11px] mb-6 leading-relaxed">
-            Equivalente al alta biométrica en el lector. Use el ID de catálogo{" "}
-            <span className="font-mono text-[#e7bdb8]">CLI-123</span>.
+            Busque al miembro por número de cliente o por nombre, selecciónelo y pídale
+            que se coloque frente al lector.
           </p>
 
           <div className="space-y-4">
             <div>
               <label className="text-[#e7bdb8] uppercase tracking-wide text-[10px] block mb-1.5">
-                ID de miembro
+                Miembro
               </label>
-              <input
-                type="text"
-                value={enrollMemberId}
-                onChange={(e) => setEnrollMemberId(e.target.value)}
-                placeholder="CLI-123"
-                className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 font-mono text-[12px] focus:border-[#e31e24] focus:outline-none uppercase"
-                disabled={enrollBusy}
-              />
-            </div>
-            <div>
-              <label className="text-[#e7bdb8] uppercase tracking-wide text-[10px] block mb-1.5">
-                Nombre (opcional)
-              </label>
-              <input
-                type="text"
-                value={enrollName}
-                onChange={(e) => setEnrollName(e.target.value)}
-                placeholder="Nombre para mostrar en el lector"
-                className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 text-[12px] focus:border-[#e31e24] focus:outline-none"
-                disabled={enrollBusy}
-              />
+              {enrollMember ? (
+                <div className="bg-[#0e0e0e] border border-[#e31e24]/40 px-3 py-3 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[#e5e2e1] text-[14px] font-bold truncate">
+                        {memberDisplayName(enrollMember) || "Sin nombre"}
+                      </p>
+                      <p className="text-[#808080] text-[11px] font-mono">{enrollMember.id}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearEnrollMember}
+                      disabled={enrollBusy}
+                      className="text-[#808080] hover:text-[#e5e2e1] text-[10px] font-bold uppercase tracking-wide inline-flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <X size={14} />
+                      Cambiar
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-wide">
+                    <span
+                      className={`px-2 py-0.5 rounded border ${
+                        isMembershipExpired(enrollMember)
+                          ? "border-[#e31e24]/50 text-[#ff6b6b]"
+                          : "border-[#00c853]/40 text-[#69f0ae]"
+                      }`}
+                    >
+                      {isMembershipExpired(enrollMember) ? "Vencido" : "Vigente"}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded border ${
+                        enrollMember.faceIdEnrolled
+                          ? "border-[#00c853]/40 text-[#69f0ae]"
+                          : "border-[#ffa500]/40 text-[#ffa500]"
+                      }`}
+                    >
+                      {enrollMember.faceIdEnrolled ? "Rostro registrado" : "Sin rostro"}
+                    </span>
+                  </div>
+                  {isMembershipExpired(enrollMember) && (
+                    <p className="text-[#ffa500] text-[11px] flex items-start gap-1.5">
+                      <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                      La membresía está vencida. Puede registrar el rostro, pero el lector
+                      no le dará acceso hasta que renueve.
+                    </p>
+                  )}
+                  {enrollMember.faceIdEnrolled && (
+                    <p className="text-[#808080] text-[11px]">
+                      Ya tiene rostro. Si continúa, se reemplazará por uno nuevo.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="relative">
+                  <Search
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-[#808080]"
+                    size={16}
+                  />
+                  <input
+                    type="text"
+                    value={enrollQuery}
+                    onChange={(e) => {
+                      setEnrollQuery(e.target.value);
+                      setSuggestionsOpen(true);
+                    }}
+                    onFocus={() => setSuggestionsOpen(true)}
+                    onBlur={() => setTimeout(() => setSuggestionsOpen(false), 150)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && memberSuggestions[0]) {
+                        e.preventDefault();
+                        selectEnrollMember(memberSuggestions[0]);
+                      }
+                    }}
+                    placeholder="Número de cliente (ej. 59) o nombre"
+                    className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] pl-10 pr-3 py-2.5 text-[12px] focus:border-[#e31e24] focus:outline-none"
+                    disabled={enrollBusy}
+                    autoComplete="off"
+                  />
+                  {suggestionsOpen && enrollQuery.trim() && (
+                    <div className="absolute z-20 left-0 right-0 mt-1 bg-[#1a1a1a] border border-[rgba(93,63,60,0.3)] max-h-72 overflow-auto shadow-lg">
+                      {memberSuggestions.length === 0 ? (
+                        <p className="px-3 py-3 text-[#808080] text-[11px] flex items-center gap-2">
+                          {membersLoading ? (
+                            <>
+                              <Loader2 className="animate-spin" size={14} />
+                              Cargando miembros…
+                            </>
+                          ) : (
+                            "No se encontró ningún miembro con ese número o nombre."
+                          )}
+                        </p>
+                      ) : (
+                        memberSuggestions.map((m) => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => selectEnrollMember(m)}
+                            className="w-full text-left px-3 py-2.5 hover:bg-[#2a2a2a] border-b border-[rgba(93,63,60,0.1)] last:border-b-0 flex items-center justify-between gap-3"
+                          >
+                            <span className="min-w-0">
+                              <span className="text-[#e5e2e1] text-[12px] font-bold block truncate">
+                                {memberDisplayName(m) || "Sin nombre"}
+                              </span>
+                              <span className="text-[#808080] text-[10px] font-mono">{m.id}</span>
+                            </span>
+                            <span
+                              className={`text-[9px] font-bold uppercase tracking-wide shrink-0 ${
+                                m.faceIdEnrolled ? "text-[#69f0ae]" : "text-[#ffa500]"
+                              }`}
+                            >
+                              {m.faceIdEnrolled ? "Con rostro" : "Sin rostro"}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <label className="text-[#e7bdb8] uppercase tracking-wide text-[10px] block mb-1.5">
@@ -805,7 +1025,7 @@ export default function AccessControl() {
             <button
               type="button"
               onClick={() => void runEnrollment()}
-              disabled={enrollBusy || !gatewayOnline}
+              disabled={enrollBusy || !gatewayOnline || !enrollMember}
               className="w-full bg-[#0e0e0e] border border-[#e31e24] text-[#e31e24] py-3 px-6 font-bold text-[11px] tracking-[1px] uppercase hover:bg-[#e31e24] hover:text-white transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {enrollBusy ? <Loader2 className="animate-spin" size={18} /> : <Camera size={18} />}
