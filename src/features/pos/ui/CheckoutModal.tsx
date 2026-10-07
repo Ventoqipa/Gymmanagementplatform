@@ -1,7 +1,7 @@
-// src/features/pos/ui/CheckoutModal.tsx
-
 import React, { useEffect, useState, useRef } from 'react';
-import { createPointOrder, checkPaymentStatus } from '../api/pointPaymentService';
+import { createPointOrder, checkPaymentStatus, cancelPointOrder } from '../api/pointPaymentService';
+
+const ACTIVE_POINT_SALE_KEY = 'active_point_sale_intent';
 
 interface CheckoutModalProps {
   saleId: string;
@@ -22,14 +22,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [paymentStatus, setPaymentStatus] = useState<'waiting' | 'processed' | 'error'>('waiting');
   const [statusMessage, setStatusMessage] = useState('Enviando orden a la terminal Point...');
 
-  // Referencia para guardar el paymentIntentId que genera la API de Mercado Pago
   const currentIntentIdRef = useRef<string | null>(null);
-
-  // Contador de tiempo (Timeout) para evitar bucles infinitos si la tarjeta falla y no se cancela la terminal
   const pollAttemptsRef = useRef(0);
-  const MAX_POLL_ATTEMPTS = 45; // 45 intentos * 2 segundos = 90 segundos de espera máxima
-
-  // Referencia para controlar el intervalo
+  const MAX_POLL_ATTEMPTS = 45; // Límite de 90 segundos (45 intentos * 2s)
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   const stopPolling = () => {
@@ -39,11 +34,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
   };
 
+  const clearActiveSaleStorage = () => {
+    localStorage.removeItem(ACTIVE_POINT_SALE_KEY);
+  };
+
   const handleStartPayment = async () => {
     stopPolling();
     pollAttemptsRef.current = 0;
 
-    // Generar sufijo único si es un reintento por error
     let currentSaleId = saleId;
     if (paymentStatus === 'error') {
       currentSaleId = `${saleId}_R${Date.now().toString().slice(-4)}`;
@@ -56,17 +54,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     try {
       const response = await createPointOrder({ saleId: currentSaleId, amount, terminalId });
       
-      // Capturamos el intentId devuelto por la API
       if (response.intentId) {
         currentIntentIdRef.current = response.intentId;
       }
 
-      setStatusMessage('Esperando a que el cliente deslice/acerque su tarjeta en la terminal...');
+      // Guardar venta activa en localStorage para resistir recargas (F5)
+      localStorage.setItem(
+        ACTIVE_POINT_SALE_KEY,
+        JSON.stringify({
+          saleId: currentSaleId,
+          amount,
+          terminalId,
+          timestamp: Date.now(),
+        })
+      );
 
-      // Consultar rastreando por el ID de la transacción actual
+      setStatusMessage('Esperando a que el cliente deslice/acerque su tarjeta en la terminal...');
       startPolling(currentSaleId);
     } catch (err: any) {
       stopPolling();
+      clearActiveSaleStorage();
       setPaymentStatus('error');
       setStatusMessage(err.message || 'Error al conectar con la terminal');
       setLoading(false);
@@ -79,13 +86,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
       try {
         const res = await checkPaymentStatus(targetSaleId);
-        
-        // Convertimos el estado a mayúsculas para evitar problemas de formato
         const rawStatus = (res.status || '').toString().toUpperCase();
 
-        // 1. CASO ÉXITO
         if (rawStatus === 'FINISHED' || rawStatus === 'PROCESSED') {
           stopPolling();
+          clearActiveSaleStorage();
           setPaymentStatus('processed');
           setStatusMessage('¡Pago Aprobado con Éxito!');
           setLoading(false);
@@ -94,35 +99,62 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             onSuccess();
           }, 1500);
         } 
-        // 2. CASO FALLO O CANCELACIÓN EXPLÍCITA
         else if (['FAILED', 'CANCELED', 'REJECTED', 'EXPIRED', 'ERROR'].includes(rawStatus)) {
           stopPolling();
+          clearActiveSaleStorage();
           setPaymentStatus('error');
           setStatusMessage('El pago fue rechazado o cancelado en la terminal.');
           setLoading(false);
         }
       } catch (err) {
-        // Ignorar fallos de red aislados durante la consulta
+        // Ignorar errores puntuales de red durante el sondeo
       }
 
-      // 3. CASO TIMEOUT (Si la terminal muestra "Intenta de nuevo" la API se queda colgada en OPEN)
       if (pollAttemptsRef.current >= MAX_POLL_ATTEMPTS) {
         stopPolling();
+        clearActiveSaleStorage();
         setPaymentStatus('error');
         setStatusMessage('Tiempo de espera agotado o la tarjeta fue rechazada. Presiona Reintentar.');
         setLoading(false);
       }
     };
 
-    // Primera revisión inmediata
     checkStatus();
-
-    // Activar el intervalo cada 2 segundos
     pollingRef.current = setInterval(checkStatus, 2000);
+  };
+
+  const handleCancel = async () => {
+    stopPolling();
+    clearActiveSaleStorage();
+    if (currentIntentIdRef.current) {
+      await cancelPointOrder(currentIntentIdRef.current, terminalId);
+    }
+    onClose();
   };
 
   useEffect(() => {
     if (!saleId || amount <= 0) return;
+
+    const savedSaleRaw = localStorage.getItem(ACTIVE_POINT_SALE_KEY);
+    
+    if (savedSaleRaw) {
+      try {
+        const savedSale = JSON.parse(savedSaleRaw);
+        const tenMinutes = 10 * 60 * 1000;
+
+        if (savedSale.saleId.startsWith(saleId) && (Date.now() - savedSale.timestamp < tenMinutes)) {
+          setStatusMessage('Reanudando estado del cobro en la terminal...');
+          setPaymentStatus('waiting');
+          setLoading(true);
+          startPolling(savedSale.saleId);
+          return;
+        } else {
+          clearActiveSaleStorage();
+        }
+      } catch (e) {
+        clearActiveSaleStorage();
+      }
+    }
 
     handleStartPayment();
 
@@ -165,10 +197,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </button>
           )}
           <button
-            onClick={() => {
-              stopPolling();
-              onClose();
-            }}
+            onClick={handleCancel}
             className="px-4 py-2 text-sm bg-stone-700 hover:bg-stone-600 rounded-lg font-medium transition"
           >
             {paymentStatus === 'processed' ? 'Cerrar' : 'Cancelar'}
