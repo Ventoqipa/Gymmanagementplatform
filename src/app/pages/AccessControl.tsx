@@ -158,6 +158,18 @@ export default function AccessControl() {
     return { granted, denied, total, rate };
   }, [log]);
 
+  const memberNamesById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of members) {
+      const name = memberDisplayName(m);
+      if (name) map.set(m.id.toUpperCase(), name);
+    }
+    return map;
+  }, [members]);
+
+  const nameForAccess = (row: Pick<AccessLogEntry, "memberId" | "memberName">) =>
+    memberNamesById.get((row.memberId ?? "").toUpperCase()) ?? row.memberName;
+
   const memberSuggestions = useMemo(
     () => (enrollMember ? [] : searchMembers(members, enrollQuery)),
     [members, enrollQuery, enrollMember],
@@ -356,7 +368,7 @@ export default function AccessControl() {
           });
         }, 1800);
         toast.success("Acceso otorgado", {
-          description: `${face.memberName} · ${(face.confidence * 100).toFixed(1)}%`,
+          description: `${nameForAccess({ memberId: face.memberId ?? "", memberName: face.memberName })} · ${(face.confidence * 100).toFixed(1)}%`,
         });
       } else {
         await turnstileCommand({
@@ -480,11 +492,18 @@ export default function AccessControl() {
       });
       await pullLiveEvents();
     } catch (error) {
+      const code = error instanceof AccessGatewayError ? error.code : "";
       const detail =
-        error instanceof AccessGatewayError
-          ? `${error.code}: ${error.message}`
-          : "Compruebe la conexión del lector e intente de nuevo.";
-      toast.error("No se pudo completar el registro", { description: detail });
+        code === "CAPTURE_TIMEOUT"
+          ? "El lector no capturó el rostro a tiempo. Pida al socio que mire de frente al lector e intente de nuevo."
+          : code === "DEVICE_OFFLINE"
+            ? "El lector elegido no está conectado. Revise en Panel que aparezca en verde."
+            : code === "NETWORK"
+              ? "Se perdió la conexión con el PC del gimnasio. Vaya a Panel y pulse Reconectar."
+              : error instanceof AccessGatewayError
+              ? error.message
+              : "Compruebe la conexión del lector e intente de nuevo.";
+      toast.error("No se pudo completar el registro", { description: detail, duration: 10_000 });
     } finally {
       setEnrollPhase("idle");
       setEnrollBusy(false);
@@ -596,7 +615,7 @@ export default function AccessControl() {
                 <div className="aspect-square bg-[#1a1a1a] overflow-hidden mb-3">
                   <img
                     src={snapshotFor(latestAccess)}
-                    alt={`Captura ${latestAccess.memberName}`}
+                    alt={`Captura ${nameForAccess(latestAccess)}`}
                     className="w-full h-full object-cover"
                   />
                 </div>
@@ -605,13 +624,16 @@ export default function AccessControl() {
                     latestAccess.result === "GRANTED" ? "text-[#00ff00]" : "text-[#e31e24]"
                   }`}
                 >
-                  {latestAccess.result}
+                  {latestAccess.result === "GRANTED" ? "Acceso permitido" : "Acceso negado"}
                 </p>
                 <p className="text-[#e5e2e1] text-[15px] font-bold mt-1">
-                  {latestAccess.memberName}
+                  {nameForAccess(latestAccess)}
                 </p>
-                <p className="text-[#808080] text-[10px] font-mono mt-1">
-                  {latestAccess.terminalId}
+                <p className="text-[#808080] text-[10px] mt-1">
+                  {ACCESS_TERMINALS[latestAccess.terminalId]?.label ?? latestAccess.terminalId}
+                  {latestAccess.memberId ? (
+                    <span className="font-mono text-[#5a5a5a]"> · {latestAccess.memberId}</span>
+                  ) : null}
                 </p>
                 {latestAccess.confidence != null && (
                   <p className="text-[#5a5a5a] text-[10px] mt-1">
@@ -653,7 +675,7 @@ export default function AccessControl() {
                     <div className="aspect-square relative">
                       <img
                         src={snapshotFor(row)}
-                        alt={row.memberName}
+                        alt={nameForAccess(row)}
                         className="w-full h-full object-cover"
                       />
                       <span
@@ -668,7 +690,7 @@ export default function AccessControl() {
                     </div>
                     <div className="p-2">
                       <p className="text-[#e5e2e1] text-[10px] font-bold truncate">
-                        {row.memberName}
+                        {nameForAccess(row)}
                       </p>
                       <p className="text-[#5a5a5a] text-[9px] font-mono">
                         {formatTime(row.timestampIso)}
@@ -1018,7 +1040,7 @@ export default function AccessControl() {
             {enrollPhase === "registering" && (
               <p className="text-[#e5e2e1] text-[11px] flex items-center gap-2">
                 <Loader2 className="animate-spin text-[#e31e24] shrink-0" size={16} />
-                Procesando plantilla y sincronizando…
+                Pida al socio que mire de frente al lector hasta que confirme (máx. 45 s)…
               </p>
             )}
 
@@ -1102,21 +1124,18 @@ export default function AccessControl() {
                       row.result === "GRANTED" ? "text-[#00ff00]" : "text-[#e31e24]"
                     }`}
                   >
-                    {row.result}
+                    {row.result === "GRANTED" ? "Permitido" : "Negado"}
                   </span>
-                  <span className="text-[#e5e2e1] text-[14px] font-bold">{row.memberName}</span>
+                  <span className="text-[#e5e2e1] text-[14px] font-bold">{nameForAccess(row)}</span>
                   {row.memberId && (
                     <span className="text-[#808080] text-[10px] font-mono">{row.memberId}</span>
                   )}
-                  <span className="text-[#808080] text-[10px] tracking-[1px] uppercase">
-                    {row.tier}
+                  <span className="text-[#808080] text-[10px]">
+                    {ACCESS_TERMINALS[row.terminalId]?.label ?? row.terminalId}
                   </span>
-                  <span className="text-[#393939] text-[9px] font-mono">{row.terminalId}</span>
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#808080] font-mono">
-                  <span>{formatTime(row.timestampIso)}</span>
-                  <span title="Solicitud FaceID">{row.faceIdVendorRequestId}</span>
-                  <span title="Comando torniquete">{row.turnstileVendorCommandId}</span>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#808080]">
+                  <span>{formatShort(row.timestampIso)}</span>
                   {row.reason && <span className="text-[#e31e24]">({row.reason})</span>}
                 </div>
               </div>

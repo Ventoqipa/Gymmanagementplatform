@@ -22,8 +22,8 @@
       font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
       color: var(--ink);
       background: var(--paper);
-      font-size: 11pt;
-      line-height: 1.45;
+      font-size: 10.5pt;
+      line-height: 1.4;
     }
     .page {
       page-break-after: always;
@@ -42,12 +42,12 @@
       margin-top: 0;
       margin-bottom: 14px;
     }
-    h3 { font-size: 12pt; margin-top: 16px; }
+    h3 { font-size: 12pt; margin-top: 12px; }
     p { margin: 0 0 10px; color: var(--ink); }
     .muted { color: var(--muted); }
     .lead { font-size: 13pt; color: var(--muted); max-width: 42em; }
     ul, ol { margin: 0 0 12px; padding-left: 1.25em; }
-    li { margin-bottom: 6px; }
+    li { margin-bottom: 4px; }
     .cover {
       display: flex;
       flex-direction: column;
@@ -90,7 +90,7 @@
       display: block;
       width: 100%;
       max-width: 520px;
-      margin: 14px auto 18px;
+      margin: 10px auto 12px;
     }
     .illus-wide { max-width: 100%; }
     .card {
@@ -130,7 +130,7 @@
       line-height: 28px;
       text-align: center;
     }
-    .steps strong { display: block; margin-bottom: 2px; }
+    .steps li > strong:first-child { display: block; margin-bottom: 2px; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -163,7 +163,7 @@
       margin: 12px 0;
     }
     .footer-note {
-      margin-top: 28px;
+      margin-top: 16px;
       font-size: 9pt;
       color: var(--muted);
       border-top: 1px solid var(--line);
@@ -376,7 +376,7 @@
       <li>Confirme que ningún programa viejo de acceso sigue abierto.</li>
     </ul>
 
-    <svg class="illus" viewBox="0 0 520 140" role="img" aria-label="Cerrar XCore antes del Gateway">
+    <svg class="illus" style="max-width:380px" viewBox="0 0 520 140" role="img" aria-label="Cerrar XCore antes del Gateway">
       <rect width="520" height="140" fill="#f7f4f3"/>
       <rect x="40" y="35" width="160" height="70" rx="8" fill="#fff" stroke="#e31e24" stroke-width="2"/>
       <text x="120" y="65" text-anchor="middle" fill="#e31e24" font-size="14" font-family="Arial" font-weight="700">XCore</text>
@@ -421,6 +421,14 @@
       <li>Debe verse <strong>Conectado</strong> y los lectores en verde (o con señal).</li>
     </ol>
 
+    <div class="warn">
+      <strong>Permiso del navegador:</strong> la primera vez, Chrome o Edge pueden mostrar un aviso
+      como <em>“Este sitio quiere buscar y conectarse a dispositivos de tu red local”</em>.
+      Pulse <strong>Permitir</strong>. Si se pulsó “Bloquear” por error, haga clic en el candado
+      junto a la dirección del sitio, active <strong>Red local / Dispositivos locales</strong>
+      y recargue la página.
+    </div>
+
     <div class="footer-note">Elite Gym 24/7 · Manual del gerente · Conexión y primer uso</div>
   </section>
 
@@ -452,22 +460,21 @@
 
     <h3>Alta de un socio nuevo</h3>
     <ol>
-      <li><strong>Miembros → Nuevo miembro</strong>.</li>
+      <li><strong>Miembros → Agregar miembro</strong>.</li>
       <li>Complete datos y cobro / membresía.</li>
       <li>En Face ID: elija el lector, pulse registrar y pida al socio que mire de frente al SpeedFace.</li>
       <li>Espere la confirmación en pantalla.</li>
     </ol>
+    <p class="muted">
+      Si en ese momento no se pudo registrar el rostro, no pasa nada: se hace después
+      desde <strong>Control de acceso</strong> (vea la sección 5).
+    </p>
 
     <h3>Ver quién entra</h3>
     <p>
-      Abra <strong>Control de acceso</strong>. Ahí verá el monitor en vivo con visitas reales
-      (no simuladas). También puede enrolar un rostro si el socio ya estaba dado de alta sin Face ID.
-    </p>
-
-    <h3>Inicio</h3>
-    <p>
-      La pantalla <strong>Inicio</strong> muestra el resumen del día y la lista de clientes
-      del catálogo (se carga al abrir).
+      Abra <strong>Control de acceso</strong>. Ahí verá el monitor en vivo con visitas reales:
+      nombre del socio, lector (Entrada principal / lateral), fecha y hora, y si el acceso
+      fue <strong>Permitido</strong> o <strong>Negado</strong>.
     </p>
 
     <table>
@@ -476,8 +483,8 @@
       </thead>
       <tbody>
         <tr><td>Inicio</td><td>Resumen del día y clientes</td></tr>
-        <tr><td>Control de acceso</td><td>Visitas en vivo, Face ID, estado de lectores</td></tr>
-        <tr><td>Miembros</td><td>Altas, renovaciones, expediente</td></tr>
+        <tr><td>Control de acceso</td><td>Visitas en vivo, registrar rostro, estado de lectores</td></tr>
+        <tr><td>Miembros</td><td>Altas, renovaciones, expediente, socios sin rostro</td></tr>
         <tr><td>Tienda</td><td>Ventas POS</td></tr>
         <tr><td>Reportes</td><td>Informes de operación</td></tr>
         <tr><td>Panel</td><td>Conexión, dispositivos y actividad del sistema de acceso</td></tr>
@@ -487,9 +494,88 @@
     <div class="footer-note">Elite Gym 24/7 · Manual del gerente · Conexión y primer uso</div>
   </section>
 
+  <!-- REGISTRAR ROSTRO -->
+  <section class="page">
+    <h2>5. Registrar el rostro de un socio que ya pagó</h2>
+    <p>
+      Úselo cuando el socio ya está dado de alta (o ya pagó su membresía) pero todavía
+      no tiene su rostro en el lector.
+    </p>
+
+    <svg class="illus illus-wide" viewBox="0 0 720 250" role="img" aria-label="Pantalla Nuevo rostro con buscador de socio">
+      <rect width="720" height="250" fill="#0e0e0e"/>
+      <rect x="20" y="16" width="680" height="218" fill="#2a2a2a"/>
+      <text x="40" y="42" fill="#e31e24" font-size="11" font-family="Arial" font-weight="700">ALTA BIOMÉTRICA</text>
+      <text x="40" y="64" fill="#e5e2e1" font-size="15" font-family="Arial" font-weight="700">NUEVO ROSTRO FACEID</text>
+      <text x="40" y="88" fill="#e7bdb8" font-size="10" font-family="Arial">MIEMBRO</text>
+      <rect x="40" y="94" width="300" height="30" fill="#0e0e0e" stroke="#e31e24"/>
+      <text x="52" y="114" fill="#e5e2e1" font-size="12" font-family="Arial">59</text>
+      <rect x="40" y="126" width="300" height="56" fill="#1a1a1a" stroke="#5d3f3c"/>
+      <text x="52" y="146" fill="#e5e2e1" font-size="12" font-family="Arial" font-weight="700">Juan Pérez López</text>
+      <text x="52" y="164" fill="#808080" font-size="10" font-family="monospace">CLI-59</text>
+      <text x="270" y="152" fill="#ffa500" font-size="9" font-family="Arial" font-weight="700">SIN ROSTRO</text>
+      <text x="52" y="200" fill="#808080" font-size="10" font-family="Arial">Escriba el número de cliente o el nombre</text>
+      <text x="52" y="214" fill="#808080" font-size="10" font-family="Arial">y elija al socio de la lista.</text>
+
+      <path d="M360 140 H400" stroke="#c9b8b6" stroke-width="3"/>
+      <polygon points="400,134 416,140 400,146" fill="#c9b8b6"/>
+
+      <rect x="430" y="86" width="250" height="96" fill="#0e0e0e" stroke="#e31e24" stroke-opacity="0.5"/>
+      <text x="444" y="108" fill="#e5e2e1" font-size="13" font-family="Arial" font-weight="700">Juan Pérez López</text>
+      <text x="444" y="126" fill="#808080" font-size="10" font-family="monospace">CLI-59</text>
+      <rect x="444" y="136" width="56" height="18" fill="none" stroke="#00c853"/>
+      <text x="472" y="149" text-anchor="middle" fill="#69f0ae" font-size="9" font-family="Arial" font-weight="700">VIGENTE</text>
+      <rect x="508" y="136" width="70" height="18" fill="none" stroke="#ffa500"/>
+      <text x="543" y="149" text-anchor="middle" fill="#ffa500" font-size="9" font-family="Arial" font-weight="700">SIN ROSTRO</text>
+      <rect x="430" y="194" width="250" height="30" fill="#0e0e0e" stroke="#e31e24"/>
+      <text x="555" y="214" text-anchor="middle" fill="#e31e24" font-size="11" font-family="Arial" font-weight="700">INICIAR REGISTRO FACIAL</text>
+    </svg>
+
+    <ol class="steps">
+      <li>
+        <strong>Abra Control de acceso</strong>
+        Baje hasta el recuadro <strong>Nuevo rostro FaceID</strong>.
+      </li>
+      <li>
+        <strong>Busque al socio</strong>
+        Escriba su <strong>número de cliente</strong> (por ejemplo 59) o parte de su
+        <strong>nombre</strong>. Aparece una lista con los socios que coinciden; elija el correcto.
+      </li>
+      <li>
+        <strong>Revise la tarjeta del socio</strong>
+        Confirme nombre y número. Verá si su membresía está <strong>Vigente</strong> o
+        <strong>Vencida</strong>, y si ya tiene rostro.
+      </li>
+      <li>
+        <strong>Elija el lector y pulse “Iniciar registro facial”</strong>
+        Pida al socio que se pare frente a ese lector y lo mire de frente hasta que
+        Elite muestre <strong>Rostro registrado</strong> (máximo 45 segundos).
+      </li>
+    </ol>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="mini-title">Atajo desde Miembros</div>
+        <p style="margin:0">
+          En la ficha del socio pulse <strong>Registrar rostro</strong>: se abre Control de acceso
+          con el socio ya seleccionado. El filtro <strong>Sin rostro</strong> muestra quién falta.
+        </p>
+      </div>
+      <div class="card">
+        <div class="mini-title">Avisos que puede ver</div>
+        <ul style="margin:0">
+          <li><strong>Vencido:</strong> se registra, pero no entrará hasta renovar.</li>
+          <li><strong>Ya tiene rostro:</strong> Elite pregunta antes de reemplazarlo.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-note">Elite Gym 24/7 · Manual del gerente · Conexión y primer uso</div>
+  </section>
+
   <!-- PRUEBAS Y PROBLEMAS -->
   <section class="page">
-    <h2>5. Primera prueba (después de conectar)</h2>
+    <h2>6. Primera prueba (después de conectar)</h2>
     <table>
       <thead>
         <tr><th>#</th><th>Qué hacer</th><th>Qué debe pasar</th></tr>
@@ -497,12 +583,14 @@
       <tbody>
         <tr><td>1</td><td>Un socio con Face ID pasa por el lector</td><td>Aparece en Control de acceso</td></tr>
         <tr><td>2</td><td>Observar el torniquete</td><td>Abre al reconocer</td></tr>
-        <tr><td>3</td><td>Registrar Face ID a un socio de prueba</td><td>Confirmación en Elite y rostro en el lector</td></tr>
-        <tr><td>4</td><td>Abrir Inicio</td><td>Se listan clientes del catálogo</td></tr>
+        <tr><td>3</td><td>Control de acceso → buscar un socio sin rostro → Iniciar registro facial</td><td>“Rostro registrado” en Elite</td></tr>
+        <tr><td>4</td><td>Ese socio pasa por el lector</td><td>Entra y aparece con su nombre en Control de acceso</td></tr>
+        <tr><td>5</td><td>Miembros → ficha de ese socio</td><td>Face ID dice ENROLLED</td></tr>
+        <tr><td>6</td><td>Abrir Inicio</td><td>Se listan clientes del catálogo</td></tr>
       </tbody>
     </table>
 
-    <h2>6. Si algo no funciona</h2>
+    <h2>7. Si algo no funciona</h2>
     <table>
       <thead>
         <tr><th>Qué ve</th><th>Qué hacer</th></tr>
@@ -525,8 +613,20 @@
           <td>Falta publicar la versión nueva del sitio (avisar a soporte / TI).</td>
         </tr>
         <tr>
+          <td>Panel: Sin conexión aunque el Gateway está activo</td>
+          <td>El navegador bloqueó el acceso a la red local: candado junto a la dirección → permitir Red local → recargar.</td>
+        </tr>
+        <tr>
+          <td>“El lector no capturó el rostro a tiempo”</td>
+          <td>El socio debe mirar de frente al lector elegido, sin gorra ni lentes oscuros. Intente de nuevo.</td>
+        </tr>
+        <tr>
+          <td>No encuentro al socio en el buscador</td>
+          <td>Revise el número o el nombre. Si es muy nuevo, vaya a Miembros → Actualizar y vuelva a buscar.</td>
+        </tr>
+        <tr>
           <td>Socio no entra</td>
-          <td>¿Tiene Face ID? ¿Membresía vigente? Re-enrolar si hace falta.</td>
+          <td>¿Tiene rostro (filtro “Sin rostro” en Miembros)? ¿Membresía vigente? Registre el rostro de nuevo si hace falta.</td>
         </tr>
       </tbody>
     </table>
@@ -541,16 +641,20 @@
       </ul>
     </div>
 
-    <h2>7. Resumen rápido</h2>
+    <h2>8. Resumen rápido</h2>
     <div class="ok">
       <ol style="margin:0;padding-left:1.2em">
         <li>Cerrar XCore</li>
         <li>Gateway activo en el PC</li>
         <li>Lectores → IP del PC, puerto 8096</li>
-        <li>Elite → Panel → Reconectar</li>
-        <li>Operar: Miembros, Face ID, Control de acceso</li>
+        <li>Elite → Panel → Reconectar (y Permitir red local si el navegador lo pide)</li>
+        <li>Operar: Miembros, registrar rostro, Control de acceso</li>
       </ol>
     </div>
+    <p class="muted" style="margin-top:12px">
+      El historial de asistencias por socio aparecerá como “Disponible pronto” en la ficha
+      del miembro; se activará en una siguiente versión.
+    </p>
 
     <p class="footer-note" style="margin-top:40px">
       Elite Gym 24/7 · Manual del gerente · Conexión y primer uso

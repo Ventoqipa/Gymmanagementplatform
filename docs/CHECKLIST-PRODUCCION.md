@@ -33,7 +33,8 @@ Hacerlo **antes** de instalar o arrancar el Access Gateway.
 En el PC de recepción (misma red que los lectores), **después** del paso 2:
 
 - [ ] Node.js instalado (`node --version`)
-- [ ] Copiar carpeta `tools/access-gateway/`
+- [ ] Copiar carpeta `tools/access-gateway/` (o descomprimir `tools/access-gateway.zip`, **versión nueva**: incluye el permiso de red local para Chrome/Edge)
+- [ ] Si ya estaba instalado: reemplazar `server.mjs` y reiniciar el Gateway (cerrar ventana / reiniciar PC)
 - [ ] Ejecutar **una vez** `install-autostart.bat` (o `start-gateway.bat` para prueba)
 - [ ] Abrir http://127.0.0.1:8787/health → debe verse `"ok": true`
 
@@ -59,6 +60,7 @@ En cada lector (Cloud Server / ADMS), apuntar al Gateway nuevo (no a XCore):
 En el **mismo PC** del gym, con el sitio ya publicado:
 
 - [ ] Login en Elite
+- [ ] Si Chrome/Edge pregunta por **dispositivos de la red local** → **Permitir**
 - [ ] **Panel → Reconectar**
 - [ ] Estado: **Conectado**
 - [ ] **Control de acceso**: monitor en vivo sin mensajes de simulación
@@ -69,10 +71,14 @@ En el **mismo PC** del gym, con el sitio ya publicado:
 
 | # | Acción | OK |
 |---|--------|-----|
-| 1 | Socio con Face ID pasa por el lector | Evento en Control de acceso |
+| 1 | Socio con Face ID pasa por el lector | Evento en Control de acceso con **nombre** del socio |
 | 2 | Torniquete abre al reconocer | |
-| 3 | Alta Face ID (Miembros o Control de acceso) | Rostro en lector + faceID en catálogo |
-| 4 | Inicio muestra clientes del catálogo | |
+| 3 | Control de acceso → Nuevo rostro → buscar por número (ej. `59`) y por nombre | Aparece el socio en la lista |
+| 4 | Registrar rostro a un socio **sin rostro** | “Rostro registrado”; en Miembros pasa a ENROLLED |
+| 5 | Ese socio pasa por el lector | Entra y aparece en Control de acceso |
+| 6 | Miembros → filtro **Sin rostro** → ficha → **Registrar rostro** | Abre Control de acceso con el socio ya elegido |
+| 7 | Socio que ya tiene rostro → Registrar | Elite pide confirmar el reemplazo |
+| 8 | Inicio muestra clientes del catálogo | |
 
 ---
 
@@ -94,6 +100,8 @@ En el **mismo PC** del gym, con el sitio ya publicado:
 | Qué ves | Qué hacer |
 |---------|-----------|
 | Panel: Sin conexión | ¿Gateway corriendo? Abrir `/health`. Pulsar Reconectar |
+| Panel: Sin conexión pero `/health` responde | El navegador bloqueó la red local: candado → permitir Red local → recargar. Confirmar que el Gateway es la versión nueva |
+| “El lector no capturó el rostro a tiempo” | El socio debe mirar de frente al lector elegido; reintentar |
 | Lectores desconectados | Revisar IP/puerto ADMS en SpeedFace y cable de red |
 | Puerto 8096 ocupado | **XCore u otro programa sigue activo** → paso 2; luego reiniciar Gateway |
 | Sitio sin menú Panel | Falta subir el `dist/` nuevo a Neubox |

@@ -139,6 +139,8 @@ function cors(res) {
     "Access-Control-Allow-Headers",
     "Content-Type, Accept, Authorization, X-Request-Id",
   );
+  // Chrome/Edge: un sitio HTTPS público llamando a 127.0.0.1 exige este header en el preflight.
+  res.setHeader("Access-Control-Allow-Private-Network", "true");
 }
 
 function sendJson(res, status, body) {
