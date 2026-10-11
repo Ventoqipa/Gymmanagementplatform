@@ -8,12 +8,13 @@ import {
   type ReactNode,
 } from "react";
 import {
+  ACCESS_TERMINALS,
   fetchGatewayDiagnostics,
   isAccessGatewayConfigured,
   pingAccessGateway,
   reconnectEliteToGateway,
   setAccessGatewayRuntimeUrl,
-  type GatewayDiagnostics,
+  type GatewayTerminal,
 } from "../core/accessGateway";
 import { useAuth } from "./AuthContext";
 
@@ -27,13 +28,24 @@ type AccessGatewayStatusValue = {
   checking: boolean;
   devicesOnline: number;
   devicesTotal: number;
-  terminals: NonNullable<GatewayDiagnostics["terminals"]>;
+  terminals: GatewayTerminal[];
   infoMessage: string;
   lastCheckedLabel: string | null;
   refreshStatus: () => Promise<void>;
   reconnect: () => Promise<{ ok: boolean; message: string }>;
   reconnecting: boolean;
+  /** Aplica la lista devuelta por el Gateway tras renombrar/quitar un lector. */
+  applyTerminals: (list: GatewayTerminal[]) => void;
+  /** Nombre visible del lector (el que se puso en Panel). */
+  terminalLabel: (terminalId: string) => string;
 };
+
+function summarize(list: GatewayTerminal[]) {
+  return {
+    onlineCount: list.filter((t) => t.online).length,
+    total: list.length,
+  };
+}
 
 const AccessGatewayStatusContext = createContext<
   AccessGatewayStatusValue | undefined
@@ -70,9 +82,7 @@ export function AccessGatewayStatusProvider({
   const [reconnecting, setReconnecting] = useState(false);
   const [devicesOnline, setDevicesOnline] = useState(0);
   const [devicesTotal, setDevicesTotal] = useState(0);
-  const [terminals, setTerminals] = useState<
-    NonNullable<GatewayDiagnostics["terminals"]>
-  >([]);
+  const [terminals, setTerminals] = useState<GatewayTerminal[]>([]);
   const [infoMessage, setInfoMessage] = useState(
     "Comprobando conexión con el sistema de acceso…",
   );
@@ -153,6 +163,31 @@ export function AccessGatewayStatusProvider({
     }
   }, [refreshStatus]);
 
+  const applyTerminals = useCallback(
+    (list: GatewayTerminal[]) => {
+      const { onlineCount, total } = summarize(list);
+      setTerminals(list);
+      setDevicesOnline(onlineCount);
+      setDevicesTotal(total);
+      setInfoMessage(
+        buildInfoMessage({
+          online: status === "connected",
+          devicesOnline: onlineCount,
+          devicesTotal: total,
+        }),
+      );
+    },
+    [status],
+  );
+
+  const terminalLabel = useCallback(
+    (terminalId: string) =>
+      terminals.find((t) => t.terminalId === terminalId)?.label ||
+      ACCESS_TERMINALS[terminalId]?.label ||
+      terminalId,
+    [terminals],
+  );
+
   useEffect(() => {
     if (!isAuthenticated) {
       setStatus("checking");
@@ -177,8 +212,12 @@ export function AccessGatewayStatusProvider({
       refreshStatus,
       reconnect,
       reconnecting,
+      applyTerminals,
+      terminalLabel,
     }),
     [
+      applyTerminals,
+      terminalLabel,
       status,
       checking,
       devicesOnline,

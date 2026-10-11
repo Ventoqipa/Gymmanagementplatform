@@ -49,9 +49,12 @@ En cada lector (Cloud Server / ADMS), apuntar al Gateway nuevo (no a XCore):
 | Servidor | IP LAN del PC del gym |
 | Puerto | `8096` |
 
-- [ ] Entrada principal (SN `SYZ8244300163`)
-- [ ] Entrada lateral (SN `SYZ8244300350`)
-- [ ] En Elite → **Panel**: ambos en **Conectado** (o al menos con señal)
+- [ ] Configurar **todos** los lectores con la misma IP del PC y puerto `8096`
+- [ ] En Elite → **Panel → Dispositivos**: cada lector aparece solo (detección automática) y en **Conectado**
+- [ ] Ponerle nombre a cada lector con el lápiz (los nuevos dicen “Nuevo · póngale nombre”)
+- [ ] Confirmar el número de lectores en Panel = número de lectores físicos (un torniquete por lector)
+
+> Los nombres se guardan en el PC del gym, en `tools/access-gateway/terminals.json`. Si se reinstala el Gateway, copiar ese archivo para no perder los nombres.
 
 ---
 
@@ -64,6 +67,8 @@ En el **mismo PC** del gym, con el sitio ya publicado:
 - [ ] **Panel → Reconectar**
 - [ ] Estado: **Conectado**
 - [ ] **Control de acceso**: monitor en vivo sin mensajes de simulación
+- [ ] **Control de acceso**: franja superior en verde “Lectores conectados y sincronizados (N)”
+- [ ] Desconectar un lector (cable de red) → la franja pasa a naranja → botón **Revisar lectores en Panel** → Panel comprueba solo → reconectar el lector → **Volver a Control de acceso**
 
 ---
 

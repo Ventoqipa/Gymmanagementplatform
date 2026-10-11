@@ -36,6 +36,8 @@ import {
   pushActivity,
   startedAtIso,
   pendingEnrolls,
+  renameTerminal,
+  removeTerminal,
 } from "./store.mjs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
@@ -375,6 +377,39 @@ const eliteServer = http.createServer(async (req, res) => {
     return sendJson(res, 200, listTerminalStatus());
   }
 
+  if (
+    req.method === "POST" &&
+    (url.pathname === "/v1/terminals/rename" || url.pathname === "/v1/terminals/remove")
+  ) {
+    let body;
+    try {
+      body = (await readBody(req)) || {};
+    } catch {
+      return sendJson(res, 400, { ok: false, code: "INVALID_REQUEST", message: "JSON inválido" });
+    }
+    const terminalId = String(body.terminalId || "").trim();
+    const result =
+      url.pathname === "/v1/terminals/rename"
+        ? renameTerminal(terminalId, body.label)
+        : removeTerminal(terminalId);
+    if (!result.ok) {
+      const messages = {
+        TERMINAL_NOT_FOUND: "Ese lector ya no existe.",
+        INVALID_LABEL: "Escriba un nombre para el lector.",
+        TERMINAL_ONLINE: "No se puede quitar un lector conectado.",
+      };
+      const status = result.code === "TERMINAL_NOT_FOUND" ? 404 : 400;
+      return sendJson(res, status, { ...result, message: messages[result.code] ?? result.code });
+    }
+    pushActivity(
+      url.pathname === "/v1/terminals/rename"
+        ? `Lector ${terminalId} renombrado a "${result.label}"`
+        : `Lector ${terminalId} quitado de la lista`,
+      { kind: "terminal-config" },
+    );
+    return sendJson(res, 200, { ...result, terminals: listTerminalStatus() });
+  }
+
   if (req.method === "GET" && url.pathname === "/v1/activity") {
     const limit = Math.min(80, Number(url.searchParams.get("limit") || 40));
     return sendJson(res, 200, {
@@ -529,6 +564,8 @@ eliteServer.listen(ELITE_PORT, HOST, () => {
   console.log(`Elite API  http://${HOST}:${ELITE_PORT}`);
   console.log(`  GET  /health`);
   console.log(`  GET  /v1/terminals`);
+  console.log(`  POST /v1/terminals/rename  { terminalId, label }`);
+  console.log(`  POST /v1/terminals/remove  { terminalId }  (solo desconectados)`);
   console.log(`  GET  /v1/activity`);
   console.log(`  GET  /v1/diagnostics`);
   console.log(`  POST /v1/diagnostics/run`);
@@ -540,9 +577,9 @@ eliteServer.listen(ELITE_PORT, HOST, () => {
 
 admsServer.listen(ADMS_PORT, HOST, () => {
   console.log(`ADMS PUSH  http://${HOST}:${ADMS_PORT}/iclock/...`);
-  console.log(`  Terminales:`);
+  console.log(`  Lectores conocidos (los nuevos se detectan solos al conectarse):`);
   for (const [id, t] of Object.entries(TERMINALS)) {
-    console.log(`    ${id} → SN ${t.serial}`);
+    console.log(`    ${id} → SN ${t.serial} (${t.label})`);
   }
   console.log(``);
   console.log(`MODO: ADMS directo + Elite`);

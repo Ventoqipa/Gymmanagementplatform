@@ -12,8 +12,9 @@ import {
   Search,
   X,
   AlertTriangle,
+  PlugZap,
 } from "lucide-react";
-import { useLocation } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
   appendAccessEnrollment,
@@ -52,6 +53,34 @@ const GYM_GATEWAY_URL = "http://127.0.0.1:8787";
 type EnrollPhase = "idle" | "capturing" | "registering";
 
 const MAX_MEMBER_SUGGESTIONS = 8;
+
+type ReaderHealthLevel = "checking" | "ok" | "warning" | "error";
+
+const readerHealthStyles: Record<ReaderHealthLevel, { box: string; text: string }> = {
+  checking: {
+    box: "border-[rgba(200,200,200,0.2)] bg-[rgba(200,200,200,0.05)]",
+    text: "text-[#c8c8c8]",
+  },
+  ok: {
+    box: "border-[rgba(0,255,0,0.25)] bg-[rgba(0,255,0,0.05)]",
+    text: "text-[#00ff00]",
+  },
+  warning: {
+    box: "border-[rgba(255,165,0,0.4)] bg-[rgba(255,165,0,0.07)]",
+    text: "text-[#ffa500]",
+  },
+  error: {
+    box: "border-[rgba(227,30,36,0.45)] bg-[rgba(227,30,36,0.08)]",
+    text: "text-[#e31e24]",
+  },
+};
+
+function relativeSignal(iso?: string | null): string {
+  if (!iso) return "sin señal";
+  const seconds = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  if (seconds < 60) return `señal hace ${seconds} s`;
+  return `señal hace ${Math.round(seconds / 60)} min`;
+}
 
 function normalizeSearch(value: string): string {
   return value
@@ -121,6 +150,7 @@ export default function AccessControl() {
     terminals: gatewayTerminals,
     infoMessage,
     refreshStatus,
+    terminalLabel,
   } = useAccessGatewayStatus();
 
   const [log, setLog] = useState<AccessLogEntry[]>([]);
@@ -134,6 +164,11 @@ export default function AccessControl() {
 
   const { isAuthenticated } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
+  const goToPanel = () => {
+    navigate("/access-hardware", { state: { autoCheck: true, from: "/access-control" } });
+  };
+  const panelAction = { label: "Ir a Panel", onClick: goToPanel };
   const enrollSectionRef = useRef<HTMLDivElement>(null);
   const [members, setMembers] = useState<Member[]>(() => loadMembers());
   const [membersLoading, setMembersLoading] = useState(false);
@@ -222,6 +257,30 @@ export default function AccessControl() {
 
   const liveFeed = useMemo(() => log.slice(0, 12), [log]);
   const latestAccess = liveFeed[0] ?? null;
+
+  const terminalOptions = useMemo(
+    () =>
+      gatewayTerminals.length > 0
+        ? gatewayTerminals.map((t) => ({
+            id: t.terminalId,
+            label: t.label || t.terminalId,
+            online: Boolean(t.online),
+          }))
+        : Object.entries(ACCESS_TERMINALS).map(([id, meta]) => ({
+            id,
+            label: meta.label,
+            online: false,
+          })),
+    [gatewayTerminals],
+  );
+
+  useEffect(() => {
+    if (terminalOptions.length === 0) return;
+    const fallback = (terminalOptions.find((o) => o.online) ?? terminalOptions[0]).id;
+    const exists = (id: string) => terminalOptions.some((o) => o.id === id);
+    if (!exists(selectedTerminal)) setSelectedTerminal(fallback);
+    if (!exists(enrollTerminal)) setEnrollTerminal(fallback);
+  }, [terminalOptions, selectedTerminal, enrollTerminal]);
 
   const syncTurnstilesFromGateway = useCallback(() => {
     const list =
@@ -317,6 +376,7 @@ export default function AccessControl() {
     if (!gatewayOnline) {
       toast.error("Sin conexión", {
         description: "Vaya a Panel y pulse Reconectar antes de esperar un acceso.",
+        action: panelAction,
       });
       return;
     }
@@ -417,6 +477,7 @@ export default function AccessControl() {
     if (!gatewayOnline) {
       toast.error("Sin conexión", {
         description: "Vaya a Panel y pulse Reconectar antes de registrar un rostro.",
+        action: panelAction,
       });
       return;
     }
@@ -503,7 +564,11 @@ export default function AccessControl() {
               : error instanceof AccessGatewayError
               ? error.message
               : "Compruebe la conexión del lector e intente de nuevo.";
-      toast.error("No se pudo completar el registro", { description: detail, duration: 10_000 });
+      toast.error("No se pudo completar el registro", {
+        description: detail,
+        duration: 10_000,
+        ...(code === "DEVICE_OFFLINE" || code === "NETWORK" ? { action: panelAction } : {}),
+      });
     } finally {
       setEnrollPhase("idle");
       setEnrollBusy(false);
@@ -523,7 +588,47 @@ export default function AccessControl() {
   const snapshotFor = (row: AccessLogEntry) =>
     row.captureSnapshotUrl ?? buildUnknownCaptureDataUrl();
 
-  const terminalOptions = Object.entries(ACCESS_TERMINALS);
+  const offlineReaders = gatewayTerminals.filter((t) => !t.online);
+  const readerHealth: { level: ReaderHealthLevel; title: string; detail: string } =
+    linkStatus === "checking" && !gatewayOnline
+      ? {
+          level: "checking",
+          title: "Comprobando lectores…",
+          detail: "Espere un momento.",
+        }
+      : !gatewayOnline
+        ? {
+            level: "error",
+            title: "Sin conexión con el sistema de acceso",
+            detail:
+              "No se verán los accesos ni se podrán registrar rostros hasta reconectar desde Panel.",
+          }
+        : gatewayTerminals.length === 0
+          ? {
+              level: "warning",
+              title: "Aún no se detecta ningún lector",
+              detail:
+                "Revise en Panel que los lectores estén encendidos y apuntando a este PC.",
+            }
+          : offlineReaders.length > 0
+            ? {
+                level: "warning",
+                title: `${offlineReaders.length} de ${gatewayTerminals.length} lector(es) sin conexión`,
+                detail: `${offlineReaders
+                  .map((t) => t.label || t.terminalId)
+                  .join(", ")}: sus accesos no llegarán a Elite. Revíselo en Panel.`,
+              }
+            : {
+                level: "ok",
+                title: `Lectores conectados y sincronizados (${gatewayTerminals.length})`,
+                detail: infoMessage || "Los accesos llegan en tiempo real.",
+              };
+  const visibleTurnstiles =
+    gatewayTerminals.length > 0
+      ? turnstiles.filter((t) =>
+          gatewayTerminals.some((g) => g.terminalId === t.terminalId),
+        )
+      : turnstiles;
   return (
     <div className="h-full bg-[#131313] p-4 md:p-6 overflow-auto">
       <div className="mb-3 md:mb-4 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
@@ -536,40 +641,67 @@ export default function AccessControl() {
             capturadas por el hardware.
           </p>
         </div>
-        <div className="text-[10px] uppercase tracking-wide space-y-1 md:text-right">
-          <p
-            className={`font-bold ${
-              gatewayOnline
-                ? "text-[#00ff00]"
-                : linkStatus === "checking"
-                  ? "text-[#c8c8c8]"
-                  : "text-[#e31e24]"
-            }`}
-          >
-            Acceso:{" "}
-            {linkStatus === "checking"
-              ? "comprobando…"
-              : gatewayOnline
-                ? "conectado"
-                : "sin conexión"}
-          </p>
-          {gatewayTerminals.length > 0 && (
-            <p className="text-[#5a5a5a] normal-case tracking-normal">
-              Lectores:{" "}
-              {gatewayTerminals
-                .map(
-                  (t) =>
-                    `${t.label || t.terminalId} ${t.online ? "conectado" : "apagado"}`,
-                )
-                .join(" · ")}
-            </p>
-          )}
-          {infoMessage ? (
-            <p className="text-[#5a5a5a] normal-case tracking-normal max-w-xs md:ml-auto">
-              {infoMessage}
-            </p>
+      </div>
+
+      <div className={`mb-6 border p-4 md:p-5 ${readerHealthStyles[readerHealth.level].box}`}>
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
+            {readerHealth.level === "checking" ? (
+              <Loader2 className="animate-spin text-[#c8c8c8] shrink-0 mt-0.5" size={20} />
+            ) : readerHealth.level === "ok" ? (
+              <CheckCircle2 className="text-[#00ff00] shrink-0 mt-0.5" size={20} />
+            ) : (
+              <AlertTriangle
+                className={`shrink-0 mt-0.5 ${readerHealthStyles[readerHealth.level].text}`}
+                size={20}
+              />
+            )}
+            <div className="min-w-0">
+              <p className={`text-[13px] font-bold ${readerHealthStyles[readerHealth.level].text}`}>
+                {readerHealth.title}
+              </p>
+              <p className="text-[#808080] text-[11px] mt-0.5">{readerHealth.detail}</p>
+            </div>
+          </div>
+          {readerHealth.level === "error" || readerHealth.level === "warning" ? (
+            <button
+              type="button"
+              onClick={goToPanel}
+              className="shrink-0 inline-flex items-center justify-center gap-2 bg-[#e31e24] text-white px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide hover:bg-[#c41a20]"
+            >
+              <PlugZap size={16} />
+              {gatewayOnline ? "Revisar lectores en Panel" : "Ir a Panel y reconectar"}
+            </button>
           ) : null}
         </div>
+        {gatewayTerminals.length > 0 ? (
+          <div className="flex flex-wrap gap-2 mt-3">
+            {gatewayTerminals.map((t) => (
+              <span
+                key={t.terminalId}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 border text-[11px] ${
+                  t.online
+                    ? "border-[rgba(0,255,0,0.25)] text-[#e5e2e1]"
+                    : "border-[rgba(227,30,36,0.4)] text-[#e5e2e1]"
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    t.online ? "bg-[#00ff00]" : "bg-[#e31e24]"
+                  }`}
+                />
+                <span className="font-bold">{t.label || t.terminalId}</span>
+                <span className="text-[#808080]">
+                  {t.online
+                    ? `sincronizado · ${relativeSignal(t.lastSeenIso)}`
+                    : t.lastSeenIso
+                      ? `sin señal desde ${formatShort(t.lastSeenIso)}`
+                      : "sin señal"}
+                </span>
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4 md:p-6 mb-6">
@@ -630,7 +762,7 @@ export default function AccessControl() {
                   {nameForAccess(latestAccess)}
                 </p>
                 <p className="text-[#808080] text-[10px] mt-1">
-                  {ACCESS_TERMINALS[latestAccess.terminalId]?.label ?? latestAccess.terminalId}
+                  {terminalLabel(latestAccess.terminalId)}
                   {latestAccess.memberId ? (
                     <span className="font-mono text-[#5a5a5a]"> · {latestAccess.memberId}</span>
                   ) : null}
@@ -738,9 +870,10 @@ export default function AccessControl() {
                 onChange={(e) => setSelectedTerminal(e.target.value)}
                 className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none"
               >
-                {terminalOptions.map(([id, meta]) => (
-                  <option key={id} value={id}>
-                    {meta.label}
+                {terminalOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                    {o.online ? "" : " (desconectado)"}
                   </option>
                 ))}
               </select>
@@ -771,7 +904,7 @@ export default function AccessControl() {
             </p>
           </div>
           <div className="space-y-3">
-            {turnstiles.map((t) => {
+            {visibleTurnstiles.map((t) => {
               const gw = gatewayTerminals.find((x) => x.terminalId === t.terminalId);
               const online = gw ? Boolean(gw.online) : t.online;
               return (
@@ -780,10 +913,10 @@ export default function AccessControl() {
                 className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4 flex items-start justify-between gap-3"
               >
                 <div>
-                  <p className="text-[#e5e2e1] text-[12px] font-bold font-mono">
-                    {t.terminalId}
+                  <p className="text-[#e5e2e1] text-[12px] font-bold">
+                    {terminalLabel(t.terminalId)}
                   </p>
-                  <p className="text-[#808080] text-[10px]">{t.label}</p>
+                  <p className="text-[#808080] text-[10px] font-mono">{t.terminalId}</p>
                   {gw?.serial ? (
                     <p className="text-[#393939] text-[9px] font-mono mt-1">{gw.serial}</p>
                   ) : null}
@@ -1005,12 +1138,29 @@ export default function AccessControl() {
                 className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none"
                 disabled={enrollBusy || !gatewayOnline}
               >
-                {terminalOptions.map(([id, meta]) => (
-                  <option key={id} value={id}>
-                    {meta.label}
+                {terminalOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                    {o.online ? "" : " (desconectado)"}
                   </option>
                 ))}
               </select>
+              {gatewayOnline &&
+              terminalOptions.some((o) => o.id === enrollTerminal && !o.online) ? (
+                <p className="text-[#ffa500] text-[11px] mt-2 flex items-start gap-1.5">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>
+                    Este lector no está conectado; el registro fallará.{" "}
+                    <button
+                      type="button"
+                      onClick={goToPanel}
+                      className="underline font-bold hover:text-[#e5e2e1]"
+                    >
+                      Revisar en Panel
+                    </button>
+                  </span>
+                </p>
+              ) : null}
             </div>
 
             <div className="flex items-center gap-2 text-[9px] text-[#5a5a5a] uppercase tracking-wider">
@@ -1131,7 +1281,7 @@ export default function AccessControl() {
                     <span className="text-[#808080] text-[10px] font-mono">{row.memberId}</span>
                   )}
                   <span className="text-[#808080] text-[10px]">
-                    {ACCESS_TERMINALS[row.terminalId]?.label ?? row.terminalId}
+                    {terminalLabel(row.terminalId)}
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#808080]">

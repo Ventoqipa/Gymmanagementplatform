@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { addClientUseCase, listClientsUseCase, updateClientUseCase, persistFaceIdUseCase, clientIdFromMemberId, sortMembersByDateAddedDesc, listBranchPricesUseCase, buildDirectPayPeriodOptions, buildDirectDebitPeriodOptions, findPeriodOption, resolveDocumentPreviewKind, type BranchPricePeriodOption, type CatalogBranchPrice } from "../core/catalog";
-import { AccessGatewayError, enrollFaceId, isAccessGatewayConfigured } from "../core/accessGateway";
+import { ACCESS_TERMINALS, AccessGatewayError, enrollFaceId, isAccessGatewayConfigured } from "../core/accessGateway";
 import {
   Search,
   ChevronLeft,
@@ -35,6 +35,7 @@ import {
   type SubscriptionPeriodKey,
 } from "../lib/plansStore";
 import { useAuth } from "../context/AuthContext";
+import { useAccessGatewayStatus } from "../context/AccessGatewayStatusContext";
 import { addMembershipPayment } from "../lib/demoStore";
 import { getGymPosService } from "../config/gymPosService";
 import {
@@ -687,6 +688,22 @@ const emptyNewMemberForm = () => {
 export default function Members() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const { terminals: gatewayTerminals } = useAccessGatewayStatus();
+  const readerOptions = useMemo(
+    () =>
+      gatewayTerminals.length > 0
+        ? gatewayTerminals.map((t) => ({
+            id: t.terminalId,
+            label: t.label || t.terminalId,
+            online: Boolean(t.online),
+          }))
+        : Object.entries(ACCESS_TERMINALS).map(([id, meta]) => ({
+            id,
+            label: meta.label,
+            online: false,
+          })),
+    [gatewayTerminals],
+  );
   const [members, setMembers] = useState<Member[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersFromApi, setMembersFromApi] = useState(false);
@@ -715,6 +732,13 @@ export default function Members() {
   const [branchPrices, setBranchPrices] = useState<CatalogBranchPrice[]>([]);
   const [branchPricesLoading, setBranchPricesLoading] = useState(false);
   const [newMemberForm, setNewMemberForm] = useState(emptyNewMemberForm());
+
+  useEffect(() => {
+    if (readerOptions.length === 0) return;
+    if (readerOptions.some((o) => o.id === newMemberForm.faceIdTerminal)) return;
+    const fallback = (readerOptions.find((o) => o.online) ?? readerOptions[0]).id;
+    setNewMemberForm((prev) => ({ ...prev, faceIdTerminal: fallback }));
+  }, [readerOptions, newMemberForm.faceIdTerminal]);
   const [step1Errors, setStep1Errors] = useState<AddMemberStep1Errors>({});
   const [showPurchaseConfirmModal, setShowPurchaseConfirmModal] = useState(false);
 
@@ -3925,8 +3949,12 @@ export default function Members() {
                         disabled={Boolean(pendingFaceIdCatalog) || Boolean(wizardSync)}
                         className="w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none text-[12px] disabled:opacity-50"
                       >
-                        <option value="TRN-MAIN-01">TRN-MAIN-01 — Entrada principal</option>
-                        <option value="TRN-MAIN-02">TRN-MAIN-02 — Entrada lateral</option>
+                        {readerOptions.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.label}
+                            {o.online ? "" : " (desconectado)"}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>

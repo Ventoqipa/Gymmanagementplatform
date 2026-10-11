@@ -1,9 +1,25 @@
-import { useCallback, useEffect, useState } from "react";
-import { Activity, Info, Loader2, PlugZap, Radio, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router";
+import {
+  Activity,
+  ArrowLeft,
+  Check,
+  Info,
+  Loader2,
+  Pencil,
+  PlugZap,
+  Radio,
+  RefreshCw,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   fetchGatewayActivity,
+  removeGatewayTerminal,
+  renameGatewayTerminal,
   type GatewayActivityRow,
+  type GatewayTerminal,
 } from "../core/accessGateway";
 import { useAccessGatewayStatus } from "../context/AccessGatewayStatusContext";
 
@@ -27,6 +43,9 @@ function friendlyActivity(message: string): string {
   if (m.includes("reconexion") || m.includes("reconexión")) {
     return "Se reconectó el sistema de acceso";
   }
+  if (m.includes("nuevo lector")) return "Se detectó un lector nuevo";
+  if (m.includes("renombrado")) return "Se cambió el nombre de un lector";
+  if (m.includes("quitado de la lista")) return "Se quitó un lector de la lista";
   if (m.includes("attlog")) return "Registro de acceso recibido";
   if (m.includes("attphoto")) return "Foto de acceso recibida";
   if (m.includes("handshake") || m.includes("registry")) {
@@ -44,6 +63,12 @@ function friendlyActivity(message: string): string {
   return message;
 }
 
+const DEFAULT_LABEL = /^Lector \d+$/;
+
+function needsName(t: GatewayTerminal): boolean {
+  return Boolean(t.autoDetected) && DEFAULT_LABEL.test(t.label ?? "");
+}
+
 export default function AccessHardware() {
   const {
     status,
@@ -57,7 +82,59 @@ export default function AccessHardware() {
     refreshStatus,
     reconnect,
     reconnecting,
+    applyTerminals,
   } = useAccessGatewayStatus();
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const startEdit = (t: GatewayTerminal) => {
+    setEditingId(t.terminalId);
+    setEditLabel(t.label ?? "");
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditLabel("");
+  };
+
+  const saveLabel = async (terminalId: string) => {
+    const label = editLabel.trim();
+    if (!label) {
+      toast.error("Escriba un nombre para el lector.");
+      return;
+    }
+    setSavingId(terminalId);
+    const result = await renameGatewayTerminal(terminalId, label);
+    setSavingId(null);
+    if (!result.ok) {
+      toast.error("No se pudo cambiar el nombre", { description: result.message });
+      return;
+    }
+    applyTerminals(result.terminals);
+    cancelEdit();
+    toast.success(`Lector guardado como “${label}”`);
+  };
+
+  const removeReader = async (t: GatewayTerminal) => {
+    if (
+      !window.confirm(
+        `¿Quitar “${t.label || t.terminalId}” de la lista? Úselo solo si ese lector ya no existe. Si se vuelve a conectar, aparecerá de nuevo.`,
+      )
+    ) {
+      return;
+    }
+    setSavingId(t.terminalId);
+    const result = await removeGatewayTerminal(t.terminalId);
+    setSavingId(null);
+    if (!result.ok) {
+      toast.error("No se pudo quitar el lector", { description: result.message });
+      return;
+    }
+    applyTerminals(result.terminals);
+    toast.success("Lector quitado de la lista");
+  };
 
   const [activity, setActivity] = useState<GatewayActivityRow[]>([]);
   const [activityLoading, setActivityLoading] = useState(true);
@@ -124,6 +201,27 @@ export default function AccessHardware() {
     }
   };
 
+  const location = useLocation();
+  const navigate = useNavigate();
+  const navState = location.state as { autoCheck?: boolean; from?: string } | null;
+  const returnTo = navState?.from === "/access-control" ? navState.from : null;
+  const autoCheckDone = useRef(false);
+
+  useEffect(() => {
+    if (!navState?.autoCheck || autoCheckDone.current) return;
+    autoCheckDone.current = true;
+    if (online) {
+      void onRefresh();
+    } else {
+      void onReconnect();
+    }
+    // Solo al llegar desde Control de acceso.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const allReadersOk =
+    online && terminals.length > 0 && terminals.every((t) => t.online);
+
   const busy = panelBusy || reconnecting || (checking && status === "checking");
   const statusTitle =
     status === "checking"
@@ -170,6 +268,21 @@ export default function AccessHardware() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {returnTo ? (
+            <button
+              type="button"
+              onClick={() => navigate(returnTo)}
+              disabled={busy}
+              className={`inline-flex items-center gap-2 px-4 py-3 text-[11px] font-bold uppercase tracking-wide disabled:opacity-50 ${
+                allReadersOk
+                  ? "bg-[#00c853] text-[#0e0e0e] hover:bg-[#00e676]"
+                  : "bg-[#1a1a1a] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] hover:bg-[#222]"
+              }`}
+            >
+              <ArrowLeft size={16} />
+              Volver a Control de acceso
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void onReconnect()}
@@ -257,6 +370,10 @@ export default function AccessHardware() {
               <Loader2 size={14} className="animate-spin text-[#808080]" />
             ) : null}
           </div>
+          <p className="text-[#5a5a5a] text-[12px] mb-4">
+            Los lectores aparecen solos en cuanto se conectan. Use el lápiz para ponerle a
+            cada uno un nombre fácil de reconocer.
+          </p>
           {terminals.length === 0 ? (
             <p className="text-[#808080] text-[14px]">
               {online
@@ -265,36 +382,123 @@ export default function AccessHardware() {
             </p>
           ) : (
             <div className="space-y-3">
-              {terminals.map((t) => (
-                <div
-                  key={t.terminalId}
-                  className="flex items-center justify-between gap-3 border-b border-[rgba(93,63,60,0.1)] pb-3"
-                >
-                  <div>
-                    <p className="text-[#e5e2e1] text-[16px] font-bold">
-                      {t.label || "Lector de acceso"}
-                    </p>
-                    {t.lastSeenIso ? (
-                      <p className="text-[#5a5a5a] text-[12px] mt-0.5">
-                        Última señal: {formatShort(t.lastSeenIso)}
-                      </p>
-                    ) : (
-                      <p className="text-[#5a5a5a] text-[12px] mt-0.5">
-                        Sin señal reciente
-                      </p>
-                    )}
-                  </div>
-                  <span
-                    className={`text-[12px] font-bold uppercase tracking-wide px-3 py-1 ${
-                      t.online
-                        ? "bg-[rgba(0,255,0,0.12)] text-[#00ff00]"
-                        : "bg-[rgba(227,30,36,0.12)] text-[#e31e24]"
-                    }`}
+              {terminals.map((t) => {
+                const isEditing = editingId === t.terminalId;
+                const isSaving = savingId === t.terminalId;
+                const details = [
+                  t.serial ? `Serie ${t.serial}` : null,
+                  t.info?.ip ? `IP ${t.info.ip}` : null,
+                  t.info?.faceCount ? `${t.info.faceCount} rostros` : null,
+                ].filter(Boolean);
+                return (
+                  <div
+                    key={t.terminalId}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[rgba(93,63,60,0.1)] pb-3"
                   >
-                    {t.online ? "Conectado" : "Desconectado"}
-                  </span>
-                </div>
-              ))}
+                    <div className="min-w-0 flex-1">
+                      {isEditing ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={editLabel}
+                            onChange={(e) => setEditLabel(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") void saveLabel(t.terminalId);
+                              if (e.key === "Escape") cancelEdit();
+                            }}
+                            maxLength={40}
+                            autoFocus
+                            disabled={isSaving}
+                            placeholder="Ej. Entrada principal"
+                            className="flex-1 min-w-0 bg-[#131313] border border-[#e31e24] text-[#e5e2e1] px-3 py-2 text-[14px] focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void saveLabel(t.terminalId)}
+                            disabled={isSaving}
+                            title="Guardar"
+                            className="p-2 bg-[#e31e24] text-white hover:bg-[#c41a20] disabled:opacity-50"
+                          >
+                            {isSaving ? (
+                              <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                              <Check size={16} />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEdit}
+                            disabled={isSaving}
+                            title="Cancelar"
+                            className="p-2 border border-[rgba(93,63,60,0.3)] text-[#808080] hover:text-[#e5e2e1]"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-[#e5e2e1] text-[16px] font-bold">
+                            {t.label || "Lector de acceso"}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => startEdit(t)}
+                            disabled={!online || savingId !== null}
+                            title="Cambiar nombre"
+                            className="p-1 text-[#808080] hover:text-[#e31e24] disabled:opacity-40"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          {needsName(t) ? (
+                            <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 bg-[rgba(255,165,0,0.12)] text-[#ffa500]">
+                              Nuevo · póngale nombre
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
+                      <p className="text-[#5a5a5a] text-[12px] mt-0.5">
+                        {t.lastSeenIso
+                          ? `Última señal: ${formatShort(t.lastSeenIso)}`
+                          : "Sin señal reciente"}
+                      </p>
+                      {details.length > 0 ? (
+                        <p className="text-[#5a5a5a] text-[11px] mt-0.5 font-mono">
+                          {details.join(" · ")}
+                        </p>
+                      ) : null}
+                      {online && !t.online ? (
+                        <p className="text-[#ffa500] text-[11px] mt-1">
+                          Revise que esté encendido, con cable de red y con servidor = IP de
+                          este PC, puerto 8096. Luego pulse Reconectar.
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {!t.online && !isEditing ? (
+                        <button
+                          type="button"
+                          onClick={() => void removeReader(t)}
+                          disabled={!online || savingId !== null}
+                          title="Quitar de la lista"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-[#808080] border border-[rgba(93,63,60,0.3)] hover:text-[#e31e24] hover:border-[#e31e24] disabled:opacity-40"
+                        >
+                          <Trash2 size={12} />
+                          Quitar
+                        </button>
+                      ) : null}
+                      <span
+                        className={`text-[12px] font-bold uppercase tracking-wide px-3 py-1 ${
+                          t.online
+                            ? "bg-[rgba(0,255,0,0.12)] text-[#00ff00]"
+                            : "bg-[rgba(227,30,36,0.12)] text-[#e31e24]"
+                        }`}
+                      >
+                        {t.online ? "Conectado" : "Desconectado"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
