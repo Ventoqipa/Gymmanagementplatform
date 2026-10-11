@@ -3,7 +3,7 @@ import {
   PosProvider,
   PosTerminal,
   type LinkedCustomer,
-} from "@/features/pos";
+} from "../../features/pos";
 import { gymPosConfig } from "../config/posHost";
 
 export default function POS() {
