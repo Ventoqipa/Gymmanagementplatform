@@ -32,6 +32,11 @@ export function usePosTerminal() {
   const [ticketReceipt, setTicketReceipt] = useState<PosTicketReceipt | null>(
     null,
   );
+  
+  // Nuevos estados para la integración de Terminal Point (Mercado Pago)
+  const [showPointModal, setShowPointModal] = useState(false);
+  const [currentSaleId, setCurrentSaleId] = useState<string | null>(null);
+
   const [newProduct, setNewProduct] = useState<ProductFormState>(() =>
     emptyForm(defaultProductCategory),
   );
@@ -52,8 +57,15 @@ export function usePosTerminal() {
   const refreshProducts = useCallback(async () => {
     setProductsLoading(true);
     try {
-      const list = await service.listProducts();
-      setProducts(list);
+          const raw: any = await service.listProducts();
+    const rows = Array.isArray(raw) ? raw : (raw?.data ?? []);
+    setProducts(
+      rows.map((p: any) => ({
+        ...p,
+        price: Number(p.price),
+        stock: Number(p.stock),
+      })),
+    );
     } catch (error) {
       const message =
         error instanceof PosApiError
@@ -308,7 +320,25 @@ export function usePosTerminal() {
         ? { id: selectedCustomer.id, name: selectedCustomer.name }
         : undefined;
     const payer = config.getSessionPayer?.() ?? undefined;
+
     try {
+      // Si el método de pago seleccionado es CARD, generamos la orden previa y abrimos el modal Point
+      if (paymentMethod === 'CARD') {
+        const result = await service.checkout(
+          cart,
+          paymentMethod,
+          member,
+          config.ivaRegimen,
+          payer ?? undefined,
+        );
+        
+        const saleId = result.sale?.id || 'SALE_' + Date.now();
+        setCurrentSaleId(saleId);
+        setShowPointModal(true);
+        return;
+      }
+
+      // Flujo normal para efectivo u otros métodos
       const result = await service.checkout(
         cart,
         paymentMethod,
@@ -383,5 +413,9 @@ export function usePosTerminal() {
     clearCart,
     handleCheckout,
     closeAddModal,
+    // Exportados para el modal de terminal Point
+    showPointModal,
+    setShowPointModal,
+    currentSaleId,
   };
 }

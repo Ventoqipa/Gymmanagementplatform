@@ -17,6 +17,7 @@ import { useEffect, useRef } from "react";
 import { usePosTerminal } from "../hooks/usePosTerminal";
 import type { LinkedCustomer } from "../domain/types";
 import { PosTicketModal } from "./PosTicketModal";
+import { CheckoutModal } from "./CheckoutModal";
 
 const PAYMENT_ICONS = {
   CARD: CreditCard,
@@ -487,6 +488,18 @@ export function PosTerminal() {
             className="border-x-0 border-b-0 rounded-none"
           />
         </div>
+      )}
+
+      {/* Modal de Cobro con Terminal Point */}
+      {pos.showPointModal && pos.currentSaleId && (
+        <CheckoutModal 
+          saleId={pos.currentSaleId} 
+          onClose={() => pos.setShowPointModal(false)} 
+          onSuccess={() => {
+            pos.setShowPointModal(false);
+            pos.clearCart();
+          }} 
+        />
       )}
 
       {pos.showAddProductModal && (
