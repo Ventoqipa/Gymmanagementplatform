@@ -444,6 +444,8 @@ export function listTerminalStatus() {
       label: t.label,
       online: isDeviceOnline(t.serial),
       lastSeenIso: d?.lastSeenIso ?? null,
+      autoDetected: Boolean(t.autoDetected),
+      firstSeenIso: t.firstSeenIso ?? null,
       info: d?.info ?? {},
     };
   });

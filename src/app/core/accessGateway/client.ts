@@ -298,6 +298,73 @@ export type GatewayActivityRow = {
   kind?: string;
 };
 
+export type GatewayTerminal = {
+  terminalId: string;
+  serial?: string;
+  label?: string;
+  online?: boolean;
+  lastSeenIso?: string | null;
+  autoDetected?: boolean;
+  firstSeenIso?: string | null;
+  info?: {
+    ip?: string;
+    firmware?: string;
+    userCount?: string;
+    faceCount?: string;
+    [key: string]: string | undefined;
+  };
+};
+
+export type GatewayTerminalChangeResult =
+  | { ok: true; terminals: GatewayTerminal[] }
+  | { ok: false; message: string };
+
+async function postTerminalChange(
+  path: string,
+  body: Record<string, string>,
+): Promise<GatewayTerminalChangeResult> {
+  if (!isAccessGatewayConfigured()) {
+    return { ok: false, message: "Sin conexión con el sistema de acceso." };
+  }
+  try {
+    const response = await fetch(accessGatewayUrl(path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await parseJsonSafe(response)) as {
+      ok?: boolean;
+      message?: string;
+      terminals?: GatewayTerminal[];
+    } | null;
+    if (response.status === 404 && !data?.message) {
+      return {
+        ok: false,
+        message: "El programa del PC es una versión anterior. Actualice el Access Gateway.",
+      };
+    }
+    if (!response.ok || !data?.ok) {
+      return { ok: false, message: data?.message || "No se pudo guardar el cambio." };
+    }
+    return { ok: true, terminals: data.terminals ?? [] };
+  } catch {
+    return { ok: false, message: "Sin conexión con el sistema de acceso." };
+  }
+}
+
+export function renameGatewayTerminal(
+  terminalId: string,
+  label: string,
+): Promise<GatewayTerminalChangeResult> {
+  return postTerminalChange(accessGatewayConfig.terminalRenamePath, { terminalId, label });
+}
+
+export function removeGatewayTerminal(
+  terminalId: string,
+): Promise<GatewayTerminalChangeResult> {
+  return postTerminalChange(accessGatewayConfig.terminalRemovePath, { terminalId });
+}
+
 export type GatewayDiagnostics = {
   ok: boolean;
   atIso?: string;
@@ -309,13 +376,7 @@ export type GatewayDiagnostics = {
   lanIps?: Array<{ name: string; address: string }>;
   suggestedAdmsUrl?: string;
   suggestedEliteUrl?: string;
-  terminals?: Array<{
-    terminalId: string;
-    serial?: string;
-    label?: string;
-    online?: boolean;
-    lastSeenIso?: string | null;
-  }>;
+  terminals?: GatewayTerminal[];
   devicesOnline?: number;
   eventsCount?: number;
   pendingEnrolls?: number;
