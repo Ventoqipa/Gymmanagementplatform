@@ -1,49 +1,110 @@
-const API_BASE_URL =
-  (import.meta as any).env?.VITE_POS_API_BASE_URL || '/pos-api';
+const API_BASE_URL = 
+  (import.meta as any).env?.VITE_POS_API_BASE_URL || '/api/v1';
+
+// Ajusta esto o léeo de tus variables de entorno del frontend (ej. import.meta.env.VITE_API_KEY)
+const API_KEY = (import.meta as any).env?.VITE_POS_API_KEY || 'pos-dev-elitegym-temp-2026';
 
 export interface CreateOrderParams {
   saleId: string;
-  amount: number;
+  amount?: number; // Opcional, ya que el backend lo lee directamente de la venta en base de datos
   terminalId?: string;
 }
 
-export async function createPointOrder({ saleId, amount, terminalId }: CreateOrderParams) {
-  const response = await fetch(`${API_BASE_URL}/point-order.php`, {
+type ApiResponse = Record<string, unknown>;
+
+type CreatePointOrderResponse = ApiResponse & {
+  data?: {
+    saleId?: string;
+    external_reference?: string;
+    status?: string;
+    mercado_pago_response?: unknown;
+  };
+};
+
+type PaymentStatusResponse = ApiResponse & {
+  data?: {
+    saleId?: string;
+    paymentStatus?: string;
+    message?: string;
+  };
+};
+
+async function parseJson(response: Response): Promise<ApiResponse> {
+  const text = await response.text();
+  let data: unknown;
+
+  try {
+    data = JSON.parse(text) as unknown;
+  } catch {
+    throw new Error(`Respuesta inválida del servidor (${response.status})`);
+  }
+
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`Respuesta inválida del servidor (${response.status})`);
+  }
+
+  return data as ApiResponse;
+}
+
+function getResponseMessage(data: ApiResponse, fallback: string): string {
+  return typeof data.message === 'string' && data.message.trim()
+    ? data.message
+    : fallback;
+}
+
+export async function createPointOrder({ saleId, terminalId }: CreateOrderParams): Promise<CreatePointOrderResponse> {
+  // Apunta al nuevo endpoint REST: POST /api/v1/sales/{saleId}/point-order
+  const response = await fetch(`${API_BASE_URL}/sales/${saleId}/point-order`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ saleId, amount, terminalId })
+    headers: { 
+      'Content-Type': 'application/json',
+      'X-Api-Key': API_KEY 
+    },
+    body: JSON.stringify({ terminal_id: terminalId })
   });
 
-  const data = await response.json();
-  if (!response.ok || !data.success) {
-    throw new Error(data.message || 'Error al crear la orden en la terminal');
-  }
-
-  return data;
-}
-
-export async function checkPaymentStatus(saleId: string) {
-  const response = await fetch(`${API_BASE_URL}/payment-status.php?saleId=${encodeURIComponent(saleId)}`);
-  const data = await response.json();
-  
+  const data = await parseJson(response);
   if (!response.ok) {
-    throw new Error(data.message || 'Error al consultar estado');
+    throw new Error(getResponseMessage(data, 'Error al crear la orden en la terminal'));
   }
 
-  return data;
+  return data as CreatePointOrderResponse;
 }
 
-export async function cancelPointOrder(paymentIntentId?: string, terminalId: string = 'NEWLAND_N950__N950NCC102544496') {
+export async function checkPaymentStatus(saleId: string, signal?: AbortSignal): Promise<PaymentStatusResponse> {
+  // Apunta al nuevo endpoint REST: GET /api/v1/sales/{saleId}/payment-status
+  const response = await fetch(
+    `${API_BASE_URL}/sales/${saleId}/payment-status`,
+    { 
+      signal,
+      headers: {
+        'X-Api-Key': API_KEY
+      }
+    }
+  );
+  
+  const data = await parseJson(response);
+  if (!response.ok) {
+    throw new Error(getResponseMessage(data, 'Error al consultar estado'));
+  }
+  return data as PaymentStatusResponse;
+}
+
+export async function cancelPointOrder(saleId: string): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE_URL}/point-cancel.php`, {
+    // Apunta al nuevo endpoint REST: POST /api/v1/sales/{saleId}/point-cancel
+    const response = await fetch(`${API_BASE_URL}/sales/${saleId}/point-cancel`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paymentIntentId, terminalId })
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Api-Key': API_KEY
+      }
     });
-    const data = await response.json();
-    return data.success === true;
+    
+    const data = await parseJson(response);
+    return response.ok;
   } catch (error) {
-    console.error("Error cancelando orden:", error);
+    console.error("Error cancelando orden en terminal:", error);
     return false;
   }
 }
