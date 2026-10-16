@@ -168,7 +168,7 @@ export default function AccessControl() {
   const goToPanel = () => {
     navigate("/access-hardware", { state: { autoCheck: true, from: "/access-control" } });
   };
-  const panelAction = { label: "Ir a Panel", onClick: goToPanel };
+  const panelAction = { label: "Ir a Configuración", onClick: goToPanel };
   const enrollSectionRef = useRef<HTMLDivElement>(null);
   const [members, setMembers] = useState<Member[]>(() => loadMembers());
   const [membersLoading, setMembersLoading] = useState(false);
@@ -314,7 +314,7 @@ export default function AccessControl() {
     if (!isAccessGatewayConfigured()) {
       setLog([]);
       setEventsLoading(false);
-      setEventsNote("Sin sistema de acceso. Vaya a Panel y pulse Reconectar.");
+      setEventsNote("Sin sistema de acceso. Vaya a Configuración y pulse Reconectar.");
       return;
     }
 
@@ -344,7 +344,7 @@ export default function AccessControl() {
         setEventsNote(`${rows.length} acceso(s) reales desde el lector.`);
       }
     } catch {
-      setEventsNote("No se pudieron leer los accesos. Intente de nuevo desde Panel → Reconectar.");
+      setEventsNote("No se pudieron leer los accesos. Intente de nuevo desde Configuración → Reconectar.");
     } finally {
       initialEventsLoad.current = false;
       setEventsLoading(false);
@@ -375,7 +375,7 @@ export default function AccessControl() {
   const waitForRealAccess = async () => {
     if (!gatewayOnline) {
       toast.error("Sin conexión", {
-        description: "Vaya a Panel y pulse Reconectar antes de esperar un acceso.",
+        description: "Vaya a Configuración y pulse Reconectar antes de esperar un acceso.",
         action: panelAction,
       });
       return;
@@ -476,7 +476,7 @@ export default function AccessControl() {
   const runEnrollment = async () => {
     if (!gatewayOnline) {
       toast.error("Sin conexión", {
-        description: "Vaya a Panel y pulse Reconectar antes de registrar un rostro.",
+        description: "Vaya a Configuración y pulse Reconectar antes de registrar un rostro.",
         action: panelAction,
       });
       return;
@@ -558,9 +558,9 @@ export default function AccessControl() {
         code === "CAPTURE_TIMEOUT"
           ? "El lector no capturó el rostro a tiempo. Pida al socio que mire de frente al lector e intente de nuevo."
           : code === "DEVICE_OFFLINE"
-            ? "El lector elegido no está conectado. Revise en Panel que aparezca en verde."
+            ? "El lector elegido no está conectado. Revise en Configuración que aparezca en verde."
             : code === "NETWORK"
-              ? "Se perdió la conexión con el PC del gimnasio. Vaya a Panel y pulse Reconectar."
+              ? "Se perdió la conexión con el PC del gimnasio. Vaya a Configuración y pulse Reconectar."
               : error instanceof AccessGatewayError
               ? error.message
               : "Compruebe la conexión del lector e intente de nuevo.";
@@ -601,14 +601,14 @@ export default function AccessControl() {
             level: "error",
             title: "Sin conexión con el sistema de acceso",
             detail:
-              "No se verán los accesos ni se podrán registrar rostros hasta reconectar desde Panel.",
+              "No se verán los accesos ni se podrán registrar rostros hasta reconectar desde Configuración.",
           }
         : gatewayTerminals.length === 0
           ? {
               level: "warning",
               title: "Aún no se detecta ningún lector",
               detail:
-                "Revise en Panel que los lectores estén encendidos y apuntando a este PC.",
+                "Revise en Configuración que los lectores estén encendidos y apuntando a este PC.",
             }
           : offlineReaders.length > 0
             ? {
@@ -616,7 +616,7 @@ export default function AccessControl() {
                 title: `${offlineReaders.length} de ${gatewayTerminals.length} lector(es) sin conexión`,
                 detail: `${offlineReaders
                   .map((t) => t.label || t.terminalId)
-                  .join(", ")}: sus accesos no llegarán a Elite. Revíselo en Panel.`,
+                  .join(", ")}: sus accesos no llegarán a Elite. Revíselo en Configuración.`,
               }
             : {
                 level: "ok",
@@ -670,7 +670,7 @@ export default function AccessControl() {
               className="shrink-0 inline-flex items-center justify-center gap-2 bg-[#e31e24] text-white px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide hover:bg-[#c41a20]"
             >
               <PlugZap size={16} />
-              {gatewayOnline ? "Revisar lectores en Panel" : "Ir a Panel y reconectar"}
+              {gatewayOnline ? "Revisar lectores en Configuración" : "Ir a Configuración y reconectar"}
             </button>
           ) : null}
         </div>
@@ -950,7 +950,7 @@ export default function AccessControl() {
             })}
           </div>
           <p className="text-[#808080] text-[10px] mt-4 leading-relaxed">
-            Estado real de cada lector. Si aparece desconectado, use Panel → Reconectar.
+            Estado real de cada lector. Si aparece desconectado, use Configuración → Reconectar.
           </p>
         </div>
 
@@ -1156,7 +1156,7 @@ export default function AccessControl() {
                       onClick={goToPanel}
                       className="underline font-bold hover:text-[#e5e2e1]"
                     >
-                      Revisar en Panel
+                      Revisar en Configuración
                     </button>
                   </span>
                 </p>

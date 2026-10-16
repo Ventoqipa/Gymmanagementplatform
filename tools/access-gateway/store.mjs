@@ -196,3 +196,58 @@ export function pushActivity(message, meta = {}) {
   console.log(`[activity] ${row.message}`);
   return row;
 }
+
+/**
+ * Traza cruda de peticiones ADMS (/iclock/*) para diagnóstico en el Panel.
+ * No guarda el cuerpo completo de fotos (solo preview / flags).
+ */
+export const admsTrace = [];
+const MAX_ADMS_TRACE = 200;
+
+export function pushAdmsTrace(partial = {}) {
+  const row = {
+    id: `TRC-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    atIso: new Date().toISOString(),
+    method: String(partial.method || ""),
+    path: String(partial.path || ""),
+    serial: partial.serial ? String(partial.serial) : undefined,
+    table: partial.table ? String(partial.table) : undefined,
+    query: partial.query ? String(partial.query).slice(0, 400) : undefined,
+    bytes: Number(partial.bytes) || 0,
+    contentType: partial.contentType
+      ? String(partial.contentType).slice(0, 120)
+      : undefined,
+    handledAs: partial.handledAs ? String(partial.handledAs) : undefined,
+    noise: Boolean(partial.noise),
+    jpeg: Boolean(partial.jpeg),
+    photoAttached: Boolean(partial.photoAttached),
+    preview: partial.preview ? String(partial.preview).slice(0, 240) : undefined,
+    note: partial.note ? String(partial.note).slice(0, 200) : undefined,
+  };
+  admsTrace.unshift(row);
+  if (admsTrace.length > MAX_ADMS_TRACE) admsTrace.length = MAX_ADMS_TRACE;
+  return row;
+}
+
+export function summarizeAdmsTrace(limit = 80) {
+  const list = admsTrace.slice(0, Math.min(MAX_ADMS_TRACE, limit));
+  const byHandled = {};
+  const byTable = {};
+  let withJpeg = 0;
+  let withPhoto = 0;
+  for (const row of admsTrace) {
+    const h = row.handledAs || "(sin)";
+    byHandled[h] = (byHandled[h] || 0) + 1;
+    if (row.table) byTable[row.table] = (byTable[row.table] || 0) + 1;
+    if (row.jpeg) withJpeg += 1;
+    if (row.photoAttached) withPhoto += 1;
+  }
+  return {
+    total: admsTrace.length,
+    withJpeg,
+    withPhoto,
+    byHandled,
+    byTable,
+    entries: list,
+  };
+}

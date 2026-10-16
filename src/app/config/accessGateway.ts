@@ -28,6 +28,7 @@ export const accessGatewayConfig = {
   eventsPath: "/v1/events",
   eventsStreamPath: "/v1/events/stream",
   activityPath: "/v1/activity",
+  admsTracePath: "/v1/adms/trace",
   diagnosticsPath: "/v1/diagnostics",
   diagnosticsRunPath: "/v1/diagnostics/run",
   reconnectPath: "/v1/reconnect",

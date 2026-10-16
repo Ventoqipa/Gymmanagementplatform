@@ -11,6 +11,7 @@ import {
   pendingEnrolls,
   pendingVerifies,
   pushActivity,
+  pushAdmsTrace,
   pushEvent,
   queueCommand,
   serialFromTerminalId,
@@ -137,29 +138,82 @@ function handleAttLog(sn, bodyText) {
   }
 }
 
-function handleAttPhoto(sn, bodyText, query) {
-  const terminalId = terminalIdFromSerial(sn) || `SN-${sn}`;
-  // Formatos comunes: PIN + timestamp + base64, o binario. Intentamos PIN= / photo.
-  const pin = query.PIN || query.pin || "";
-  let photo = bodyText;
-  // A veces: "PIN=xx\tSN=..\tsize=..\tphoto=base64..."
-  const fields = parseTabFields(bodyText);
-  if (fields.photo || fields.Photo || fields.tmp || fields.TMP) {
-    photo = fields.photo || fields.Photo || fields.tmp || fields.TMP;
+function findEmbeddedJpeg(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 4) return null;
+  for (let i = 0; i < buf.length - 2; i++) {
+    if (buf[i] === 0xff && buf[i + 1] === 0xd8 && buf[i + 2] === 0xff) {
+      let end = buf.length;
+      for (let j = i + 3; j < buf.length - 1; j++) {
+        if (buf[j] === 0xff && buf[j + 1] === 0xd9) {
+          end = j + 2;
+          break;
+        }
+      }
+      return buf.subarray(i, end);
+    }
   }
-  const dataUrl =
-    photo && !photo.startsWith("data:")
-      ? photo.startsWith("/9j/") || /^[A-Za-z0-9+/=]+$/.test(photo.slice(0, 80))
-        ? `data:image/jpeg;base64,${photo}`
-        : undefined
-      : photo;
+  return null;
+}
+
+function previewFromBuffer(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length === 0) return undefined;
+  const jpeg = findEmbeddedJpeg(buf);
+  const head = buf.subarray(0, Math.min(48, buf.length));
+  const hex = [...head].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+  const asText = buf.toString("utf8", 0, Math.min(160, buf.length)).replace(/[^\x09\x0a\x0d\x20-\x7e]/g, ".");
+  return jpeg
+    ? `JPEG ${jpeg.length}B · hex ${hex}`
+    : `hex ${hex} · txt ${asText.slice(0, 120)}`;
+}
+
+/**
+ * @returns {{ attached: boolean, jpeg: boolean, dataUrl?: string, note?: string }}
+ */
+function handleAttPhoto(sn, buf, query) {
+  const terminalId = terminalIdFromSerial(sn) || `SN-${sn}`;
+  const pin = query.PIN || query.pin || "";
+  const bodyText = Buffer.isBuffer(buf) ? buf.toString("utf8") : String(buf || "");
+  let dataUrl;
+  let jpeg = false;
+
+  const embedded = findEmbeddedJpeg(Buffer.isBuffer(buf) ? buf : Buffer.from(bodyText));
+  if (embedded) {
+    jpeg = true;
+    dataUrl = `data:image/jpeg;base64,${embedded.toString("base64")}`;
+  } else {
+    let photo = bodyText;
+    const fields = parseTabFields(bodyText);
+    if (fields.photo || fields.Photo || fields.tmp || fields.TMP) {
+      photo = fields.photo || fields.Photo || fields.tmp || fields.TMP;
+    }
+    if (photo?.startsWith("data:")) {
+      dataUrl = photo;
+      jpeg = photo.includes("image/jpeg");
+    } else if (
+      photo &&
+      (photo.startsWith("/9j/") || /^[A-Za-z0-9+/=\r\n]+$/.test(photo.slice(0, 120)))
+    ) {
+      const clean = photo.replace(/\s+/g, "");
+      dataUrl = `data:image/jpeg;base64,${clean}`;
+      jpeg = true;
+    }
+  }
 
   if (!dataUrl) {
-    console.log(`[adms:attphoto] SN=${sn} (sin imagen parseable)`);
-    return;
+    console.log(
+      `[adms:attphoto] SN=${sn} bytes=${Buffer.isBuffer(buf) ? buf.length : 0} (sin imagen parseable)`,
+    );
+    pushActivity(`${sn}: ATTPHOTO sin imagen parseable`, {
+      serial: sn,
+      kind: "attphoto",
+    });
+    return {
+      attached: false,
+      jpeg: false,
+      note: "sin imagen parseable",
+    };
   }
 
-  // Adjuntar al último evento del mismo PIN/terminal si existe.
   const memberId = pin ? `CLI-${pin}` : undefined;
   const latest = events.find(
     (e) =>
@@ -171,7 +225,7 @@ function handleAttPhoto(sn, bodyText, query) {
     latest.captureSnapshotUrl = dataUrl;
     console.log(`[adms:attphoto] adjunto a ${latest.id}`);
     pushActivity(`${sn}: ATTPHOTO adjunto`, { serial: sn, kind: "attphoto" });
-    return;
+    return { attached: true, jpeg, dataUrl };
   }
 
   const evt = makeEvent({
@@ -183,6 +237,8 @@ function handleAttPhoto(sn, bodyText, query) {
     captureSnapshotUrl: dataUrl,
   });
   pushEvent(evt);
+  pushActivity(`${sn}: ATTPHOTO (evento nuevo)`, { serial: sn, kind: "attphoto" });
+  return { attached: true, jpeg, dataUrl };
 }
 
 function handleOperOrBio(sn, bodyText, table) {
@@ -225,10 +281,23 @@ function sendText(res, status, text, contentType = "text/plain") {
   res.end(body);
 }
 
+function traceBase(req, url, sn, table) {
+  const qs = url.searchParams.toString();
+  return {
+    method: req.method,
+    path: url.pathname,
+    serial: sn || undefined,
+    table: table || undefined,
+    query: qs || undefined,
+    contentType: req.headers["content-type"],
+  };
+}
+
 export async function handleAdms(req, res, url) {
   const sn = (url.searchParams.get("SN") || url.searchParams.get("sn") || "").trim();
   const table = (url.searchParams.get("table") || "").toUpperCase();
   const options = url.searchParams.get("options");
+  const base = traceBase(req, url, sn, table);
 
   if (sn) touchDevice(sn);
 
@@ -257,25 +326,37 @@ export async function handleAdms(req, res, url) {
     ].join("\n");
     console.log(`[adms] handshake options SN=${sn}`);
     pushActivity(`${sn}: HANDSHAKE / options=all`, { serial: sn, kind: "handshake" });
+    pushAdmsTrace({ ...base, handledAs: "handshake", bytes: 0 });
     return sendText(res, 200, body);
   }
 
   if (req.method === "GET" && url.pathname === "/iclock/registry") {
+    pushAdmsTrace({ ...base, handledAs: "registry-get", bytes: 0, noise: true });
     return sendText(res, 200, "RegistryCode=EliteGym\n");
   }
 
   if (req.method === "POST" && url.pathname === "/iclock/registry") {
     const chunks = [];
     for await (const c of req) chunks.push(c);
-    const text = Buffer.concat(chunks).toString("utf8");
+    const buf = Buffer.concat(chunks);
+    const text = buf.toString("utf8");
     if (sn) touchDevice(sn, parseKvLines(text));
     console.log(`[adms] registry SN=${sn}`);
     pushActivity(`${sn}: REGISTRY`, { serial: sn, kind: "registry" });
+    pushAdmsTrace({
+      ...base,
+      handledAs: "registry",
+      bytes: buf.length,
+      preview: previewFromBuffer(buf),
+    });
     return sendText(res, 200, "OK");
   }
 
   if (req.method === "GET" && url.pathname === "/iclock/getrequest") {
-    if (!sn) return sendText(res, 400, "ERROR: missing SN");
+    if (!sn) {
+      pushAdmsTrace({ ...base, handledAs: "getrequest-error", note: "missing SN" });
+      return sendText(res, 400, "ERROR: missing SN");
+    }
     const info = url.searchParams.get("INFO");
     if (info) {
       // INFO=FW,UserCount,FPCount,AttCount,IP,AlgFP,AlgFace,FaceNeed,FaceCount,FunFlag
@@ -294,24 +375,38 @@ export async function handleAdms(req, res, url) {
         serial: sn,
         kind: "getrequest",
       });
+      pushAdmsTrace({
+        ...base,
+        handledAs: "getrequest-cmds",
+        preview: cmds.slice(0, 160),
+      });
       return sendText(res, 200, cmds);
     }
     if (shouldLogPing(sn)) {
       pushActivity(`${sn}: GETREQUEST / PING`, { serial: sn, kind: "ping" });
     }
+    pushAdmsTrace({
+      ...base,
+      handledAs: info ? "getrequest-info" : "ping",
+      noise: true,
+      preview: info ? `INFO=${info.slice(0, 120)}` : undefined,
+    });
     return sendText(res, 200, "OK");
   }
 
   if (req.method === "POST" && url.pathname === "/iclock/devicecmd") {
     const chunks = [];
     for await (const c of req) chunks.push(c);
-    const text = Buffer.concat(chunks).toString("utf8");
+    const buf = Buffer.concat(chunks);
+    const text = buf.toString("utf8");
     console.log(`[adms:devicecmd] SN=${sn} ${text.slice(0, 200)}`);
     // ID=1&Return=0&CMD=ENROLL_BIO
     const kv = Object.fromEntries(
       text.split("&").map((p) => {
         const i = p.indexOf("=");
-        return i === -1 ? [p, ""] : [decodeURIComponent(p.slice(0, i)), decodeURIComponent(p.slice(i + 1))];
+        return i === -1
+          ? [p, ""]
+          : [decodeURIComponent(p.slice(0, i)), decodeURIComponent(p.slice(i + 1))];
       }),
     );
     const ret = Number(kv.Return ?? kv.return ?? 1);
@@ -341,6 +436,13 @@ export async function handleAdms(req, res, url) {
         }
       }
     }
+    pushAdmsTrace({
+      ...base,
+      handledAs: "devicecmd",
+      bytes: buf.length,
+      preview: text.slice(0, 200),
+      note: cmd ? `CMD=${cmd} Return=${ret}` : undefined,
+    });
     return sendText(res, 200, "OK");
   }
 
@@ -349,31 +451,70 @@ export async function handleAdms(req, res, url) {
     for await (const c of req) chunks.push(c);
     const buf = Buffer.concat(chunks);
     const text = buf.toString("utf8");
+    const jpeg = Boolean(findEmbeddedJpeg(buf));
 
     if (table === "ATTLOG" || table === "ATT_LOG") {
       handleAttLog(sn, text);
+      pushAdmsTrace({
+        ...base,
+        handledAs: "attlog",
+        bytes: buf.length,
+        jpeg,
+        preview: previewFromBuffer(buf),
+      });
       return sendText(res, 200, "OK");
     }
     if (table === "ATTPHOTO" || table === "ATT_PHOTO") {
-      handleAttPhoto(sn, text, Object.fromEntries(url.searchParams));
+      const photo = handleAttPhoto(sn, buf, Object.fromEntries(url.searchParams));
+      pushAdmsTrace({
+        ...base,
+        handledAs: photo.attached ? "attphoto" : "attphoto-unparsed",
+        bytes: buf.length,
+        jpeg: photo.jpeg || jpeg,
+        photoAttached: photo.attached,
+        preview: previewFromBuffer(buf),
+        note: photo.note,
+      });
       return sendText(res, 200, "OK");
     }
     if (table === "OPERLOG" || table === "BIODATA" || table === "FACE") {
       handleOperOrBio(sn, text, table || "OPERLOG");
+      pushAdmsTrace({
+        ...base,
+        handledAs: table.toLowerCase(),
+        bytes: buf.length,
+        preview: previewFromBuffer(buf),
+      });
       return sendText(res, 200, "OK");
     }
     if (table === "USERINFO") {
       console.log(`[adms:userinfo] SN=${sn} bytes=${buf.length}`);
+      pushAdmsTrace({
+        ...base,
+        handledAs: "userinfo",
+        bytes: buf.length,
+        preview: previewFromBuffer(buf),
+      });
       return sendText(res, 200, "OK");
     }
 
     // Sin table: a veces options / stamp
+    let handledAs = "cdata";
     if (text.includes("ATTLOG") || /^\d+\t/.test(text)) {
       handleAttLog(sn, text);
+      handledAs = "attlog-inferred";
     }
+    pushAdmsTrace({
+      ...base,
+      handledAs,
+      bytes: buf.length,
+      jpeg,
+      preview: previewFromBuffer(buf),
+    });
     return sendText(res, 200, "OK");
   }
 
+  pushAdmsTrace({ ...base, handledAs: "not-found", note: `${req.method} ${url.pathname}` });
   return sendText(res, 404, "NOT FOUND");
 }
 

@@ -38,6 +38,7 @@ import {
   pendingEnrolls,
   renameTerminal,
   removeTerminal,
+  summarizeAdmsTrace,
 } from "./store.mjs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
@@ -418,6 +419,40 @@ const eliteServer = http.createServer(async (req, res) => {
     });
   }
 
+  if (req.method === "GET" && url.pathname === "/v1/adms/trace") {
+    const limit = Math.min(200, Number(url.searchParams.get("limit") || 80));
+    const hideNoise = url.searchParams.get("noise") === "0";
+    const only = (url.searchParams.get("only") || "").trim().toLowerCase();
+    const summary = summarizeAdmsTrace(limit);
+    let entries = summary.entries;
+    if (hideNoise) entries = entries.filter((e) => !e.noise);
+    if (only === "data") {
+      entries = entries.filter((e) =>
+        /attlog|attphoto|devicecmd|operlog|biodata|face|userinfo|enroll/i.test(
+          String(e.handledAs || e.table || ""),
+        ),
+      );
+    } else if (only === "photo") {
+      entries = entries.filter(
+        (e) =>
+          e.jpeg ||
+          e.photoAttached ||
+          /attphoto/i.test(String(e.handledAs || e.table || "")),
+      );
+    }
+    return sendJson(res, 200, {
+      ok: true,
+      total: summary.total,
+      withJpeg: summary.withJpeg,
+      withPhoto: summary.withPhoto,
+      byHandled: summary.byHandled,
+      byTable: summary.byTable,
+      trace: entries,
+      hint:
+        "Si solo ve ping/registry/handshake, el lector está vivo pero aún no empuja ATTLOG/ATTPHOTO. Pase un socio enrolado y revise de nuevo.",
+    });
+  }
+
   if (req.method === "GET" && url.pathname === "/v1/diagnostics") {
     const runNetstat = url.searchParams.get("netstat") === "1";
     try {
@@ -567,6 +602,7 @@ eliteServer.listen(ELITE_PORT, HOST, () => {
   console.log(`  POST /v1/terminals/rename  { terminalId, label }`);
   console.log(`  POST /v1/terminals/remove  { terminalId }  (solo desconectados)`);
   console.log(`  GET  /v1/activity`);
+  console.log(`  GET  /v1/adms/trace`);
   console.log(`  GET  /v1/diagnostics`);
   console.log(`  POST /v1/diagnostics/run`);
   console.log(`  POST /v1/reconnect`);
