@@ -91,9 +91,17 @@ export class RestPosRepository implements PosRepository {
         payerName: input.payer?.name,
       },
     );
+    
+    const pending: any = (result as any).data ?? result;
+    if (!result.sale && pending?.saleId !== undefined) {
+      return {
+        sale: { id: String(pending.saleId), status: pending.status } as unknown as PosSale,
+        receipt: undefined as unknown as PosTicketReceipt,
+        products: await this.listProducts(),
+      };
+    }
 
-    const products =
-      result.products ?? (await this.listProducts());
+    const products = result.products ?? (await this.listProducts());
 
     return {
       sale: normalizePosSale(result.sale),

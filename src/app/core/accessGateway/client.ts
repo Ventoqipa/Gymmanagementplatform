@@ -2,6 +2,7 @@ import {
   accessGatewayConfig,
   accessGatewayUrl,
   isAccessGatewayConfigured,
+  setAccessGatewayRuntimeUrl,
 } from "../../config/accessGateway";
 import {
   buildEnrollPayload,
