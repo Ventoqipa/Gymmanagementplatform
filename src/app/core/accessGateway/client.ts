@@ -299,6 +299,73 @@ export type GatewayActivityRow = {
   kind?: string;
 };
 
+export type GatewayTerminal = {
+  terminalId: string;
+  serial?: string;
+  label?: string;
+  online?: boolean;
+  lastSeenIso?: string | null;
+  autoDetected?: boolean;
+  firstSeenIso?: string | null;
+  info?: {
+    ip?: string;
+    firmware?: string;
+    userCount?: string;
+    faceCount?: string;
+    [key: string]: string | undefined;
+  };
+};
+
+export type GatewayTerminalChangeResult =
+  | { ok: true; terminals: GatewayTerminal[] }
+  | { ok: false; message: string };
+
+async function postTerminalChange(
+  path: string,
+  body: Record<string, string>,
+): Promise<GatewayTerminalChangeResult> {
+  if (!isAccessGatewayConfigured()) {
+    return { ok: false, message: "Sin conexión con el sistema de acceso." };
+  }
+  try {
+    const response = await fetch(accessGatewayUrl(path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await parseJsonSafe(response)) as {
+      ok?: boolean;
+      message?: string;
+      terminals?: GatewayTerminal[];
+    } | null;
+    if (response.status === 404 && !data?.message) {
+      return {
+        ok: false,
+        message: "El programa del PC es una versión anterior. Actualice el Access Gateway.",
+      };
+    }
+    if (!response.ok || !data?.ok) {
+      return { ok: false, message: data?.message || "No se pudo guardar el cambio." };
+    }
+    return { ok: true, terminals: data.terminals ?? [] };
+  } catch {
+    return { ok: false, message: "Sin conexión con el sistema de acceso." };
+  }
+}
+
+export function renameGatewayTerminal(
+  terminalId: string,
+  label: string,
+): Promise<GatewayTerminalChangeResult> {
+  return postTerminalChange(accessGatewayConfig.terminalRenamePath, { terminalId, label });
+}
+
+export function removeGatewayTerminal(
+  terminalId: string,
+): Promise<GatewayTerminalChangeResult> {
+  return postTerminalChange(accessGatewayConfig.terminalRemovePath, { terminalId });
+}
+
 export type GatewayDiagnostics = {
   ok: boolean;
   atIso?: string;
@@ -310,13 +377,7 @@ export type GatewayDiagnostics = {
   lanIps?: Array<{ name: string; address: string }>;
   suggestedAdmsUrl?: string;
   suggestedEliteUrl?: string;
-  terminals?: Array<{
-    terminalId: string;
-    serial?: string;
-    label?: string;
-    online?: boolean;
-    lastSeenIso?: string | null;
-  }>;
+  terminals?: GatewayTerminal[];
   devicesOnline?: number;
   eventsCount?: number;
   pendingEnrolls?: number;
@@ -342,6 +403,61 @@ export async function fetchGatewayActivity(limit = 40): Promise<GatewayActivityR
     return Array.isArray(body?.activity) ? body.activity : [];
   } catch {
     return [];
+  }
+}
+
+export type AdmsTraceRow = {
+  id: string;
+  atIso: string;
+  method?: string;
+  path?: string;
+  serial?: string;
+  table?: string;
+  query?: string;
+  bytes?: number;
+  contentType?: string;
+  handledAs?: string;
+  noise?: boolean;
+  jpeg?: boolean;
+  photoAttached?: boolean;
+  preview?: string;
+  note?: string;
+};
+
+export type AdmsTraceResponse = {
+  ok: boolean;
+  total: number;
+  withJpeg: number;
+  withPhoto: number;
+  byHandled: Record<string, number>;
+  byTable: Record<string, number>;
+  trace: AdmsTraceRow[];
+  hint?: string;
+};
+
+export async function fetchAdmsTrace(options?: {
+  limit?: number;
+  /** "all" | "data" | "photo" */
+  only?: "all" | "data" | "photo";
+  hideNoise?: boolean;
+}): Promise<AdmsTraceResponse | null> {
+  if (!isAccessGatewayConfigured()) return null;
+  try {
+    const limit = Math.min(200, options?.limit ?? 80);
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (options?.hideNoise) params.set("noise", "0");
+    if (options?.only && options.only !== "all") params.set("only", options.only);
+    const response = await fetch(
+      accessGatewayUrl(`${accessGatewayConfig.admsTracePath}?${params}`),
+      { method: "GET", headers: { Accept: "application/json" } },
+    );
+    if (!response.ok) return null;
+    const body = (await parseJsonSafe(response)) as AdmsTraceResponse | null;
+    if (!body || !Array.isArray(body.trace)) return null;
+    return body;
+  } catch {
+    return null;
   }
 }
 

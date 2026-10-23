@@ -1,8 +1,17 @@
 /**
  * Estado en memoria del Access Gateway productivo.
+ * Los lectores se detectan solos (cualquier SN que haga ADMS PUSH) y se guardan en terminals.json.
  */
 
-export const TERMINALS = {
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const TERMINALS_FILE =
+  process.env.TERMINALS_FILE ||
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "terminals.json");
+
+const DEFAULT_TERMINALS = {
   "TRN-MAIN-01": {
     serial: "SYZ8244300163",
     label: "Entrada principal",
@@ -12,6 +21,81 @@ export const TERMINALS = {
     label: "Entrada lateral",
   },
 };
+
+const MAX_LABEL_LENGTH = 40;
+const VALID_SERIAL = /^[A-Za-z0-9_-]{4,40}$/;
+
+function loadTerminals() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(TERMINALS_FILE, "utf8"));
+    if (raw && typeof raw === "object" && raw.terminals && typeof raw.terminals === "object") {
+      return raw.terminals;
+    }
+  } catch {
+    /* primer arranque o archivo dañado: usar defaults */
+  }
+  return structuredClone(DEFAULT_TERMINALS);
+}
+
+export const TERMINALS = loadTerminals();
+
+function saveTerminals() {
+  try {
+    const tmp = `${TERMINALS_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ terminals: TERMINALS }, null, 2), "utf8");
+    fs.renameSync(tmp, TERMINALS_FILE);
+  } catch (e) {
+    console.error(`[terminals] no se pudo guardar ${TERMINALS_FILE}:`, e?.message || e);
+  }
+}
+
+/** Registra un lector nuevo la primera vez que hace contacto ADMS. */
+export function ensureTerminalForSerial(sn) {
+  const serial = String(sn || "").trim();
+  if (!VALID_SERIAL.test(serial)) return null;
+  const existing = terminalIdFromSerial(serial);
+  if (existing) return existing;
+
+  const terminalId = `TRN-${serial.toUpperCase()}`;
+  const count = Object.keys(TERMINALS).length + 1;
+  TERMINALS[terminalId] = {
+    serial,
+    label: `Lector ${count}`,
+    autoDetected: true,
+    firstSeenIso: new Date().toISOString(),
+  };
+  saveTerminals();
+  pushActivity(`${serial}: NUEVO LECTOR detectado (${terminalId})`, {
+    serial,
+    kind: "detected",
+  });
+  return terminalId;
+}
+
+export function renameTerminal(terminalId, label) {
+  const t = TERMINALS[terminalId];
+  if (!t) return { ok: false, code: "TERMINAL_NOT_FOUND" };
+  const clean = String(label || "")
+    .replace(/[\t\r\n]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_LABEL_LENGTH);
+  if (!clean) return { ok: false, code: "INVALID_LABEL" };
+  t.label = clean;
+  saveTerminals();
+  return { ok: true, terminalId, label: clean };
+}
+
+/** Solo lectores desconectados (p. ej. un equipo reemplazado). Si vuelve a reportar, se detecta otra vez. */
+export function removeTerminal(terminalId) {
+  const t = TERMINALS[terminalId];
+  if (!t) return { ok: false, code: "TERMINAL_NOT_FOUND" };
+  if (isDeviceOnline(t.serial)) return { ok: false, code: "TERMINAL_ONLINE" };
+  delete TERMINALS[terminalId];
+  devices.delete(t.serial);
+  saveTerminals();
+  return { ok: true, terminalId };
+}
 
 export function terminalIdFromSerial(sn) {
   const serial = String(sn || "").trim().toUpperCase();
@@ -79,6 +163,7 @@ export const pendingVerifies = new Map();
 
 export function touchDevice(serial, info = {}) {
   const sn = String(serial).trim();
+  if (!ensureTerminalForSerial(sn)) return;
   const prev = devices.get(sn) || { serial: sn, info: {}, online: false };
   devices.set(sn, {
     serial: sn,
@@ -110,4 +195,59 @@ export function pushActivity(message, meta = {}) {
   if (activityLog.length > MAX_ACTIVITY) activityLog.length = MAX_ACTIVITY;
   console.log(`[activity] ${row.message}`);
   return row;
+}
+
+/**
+ * Traza cruda de peticiones ADMS (/iclock/*) para diagnóstico en el Panel.
+ * No guarda el cuerpo completo de fotos (solo preview / flags).
+ */
+export const admsTrace = [];
+const MAX_ADMS_TRACE = 200;
+
+export function pushAdmsTrace(partial = {}) {
+  const row = {
+    id: `TRC-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    atIso: new Date().toISOString(),
+    method: String(partial.method || ""),
+    path: String(partial.path || ""),
+    serial: partial.serial ? String(partial.serial) : undefined,
+    table: partial.table ? String(partial.table) : undefined,
+    query: partial.query ? String(partial.query).slice(0, 400) : undefined,
+    bytes: Number(partial.bytes) || 0,
+    contentType: partial.contentType
+      ? String(partial.contentType).slice(0, 120)
+      : undefined,
+    handledAs: partial.handledAs ? String(partial.handledAs) : undefined,
+    noise: Boolean(partial.noise),
+    jpeg: Boolean(partial.jpeg),
+    photoAttached: Boolean(partial.photoAttached),
+    preview: partial.preview ? String(partial.preview).slice(0, 240) : undefined,
+    note: partial.note ? String(partial.note).slice(0, 200) : undefined,
+  };
+  admsTrace.unshift(row);
+  if (admsTrace.length > MAX_ADMS_TRACE) admsTrace.length = MAX_ADMS_TRACE;
+  return row;
+}
+
+export function summarizeAdmsTrace(limit = 80) {
+  const list = admsTrace.slice(0, Math.min(MAX_ADMS_TRACE, limit));
+  const byHandled = {};
+  const byTable = {};
+  let withJpeg = 0;
+  let withPhoto = 0;
+  for (const row of admsTrace) {
+    const h = row.handledAs || "(sin)";
+    byHandled[h] = (byHandled[h] || 0) + 1;
+    if (row.table) byTable[row.table] = (byTable[row.table] || 0) + 1;
+    if (row.jpeg) withJpeg += 1;
+    if (row.photoAttached) withPhoto += 1;
+  }
+  return {
+    total: admsTrace.length,
+    withJpeg,
+    withPhoto,
+    byHandled,
+    byTable,
+    entries: list,
+  };
 }

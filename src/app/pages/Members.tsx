@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { addClientUseCase, listClientsUseCase, updateClientUseCase, persistFaceIdUseCase, clientIdFromMemberId, sortMembersByDateAddedDesc, listBranchPricesUseCase, buildDirectPayPeriodOptions, buildDirectDebitPeriodOptions, findPeriodOption, resolveDocumentPreviewKind, type BranchPricePeriodOption, type CatalogBranchPrice } from "../core/catalog";
-import { AccessGatewayError, enrollFaceId, isAccessGatewayConfigured } from "../core/accessGateway";
+import { ACCESS_TERMINALS, AccessGatewayError, enrollFaceId, isAccessGatewayConfigured } from "../core/accessGateway";
 import {
   Search,
   ChevronLeft,
@@ -35,6 +35,7 @@ import {
   type SubscriptionPeriodKey,
 } from "../lib/plansStore";
 import { useAuth } from "../context/AuthContext";
+import { useAccessGatewayStatus } from "../context/AccessGatewayStatusContext";
 import { addMembershipPayment } from "../lib/demoStore";
 import { getGymPosService } from "../config/gymPosService";
 import {
@@ -687,6 +688,22 @@ const emptyNewMemberForm = () => {
 export default function Members() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const { terminals: gatewayTerminals } = useAccessGatewayStatus();
+  const readerOptions = useMemo(
+    () =>
+      gatewayTerminals.length > 0
+        ? gatewayTerminals.map((t) => ({
+            id: t.terminalId,
+            label: t.label || t.terminalId,
+            online: Boolean(t.online),
+          }))
+        : Object.entries(ACCESS_TERMINALS).map(([id, meta]) => ({
+            id,
+            label: meta.label,
+            online: false,
+          })),
+    [gatewayTerminals],
+  );
   const [members, setMembers] = useState<Member[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersFromApi, setMembersFromApi] = useState(false);
@@ -715,6 +732,13 @@ export default function Members() {
   const [branchPrices, setBranchPrices] = useState<CatalogBranchPrice[]>([]);
   const [branchPricesLoading, setBranchPricesLoading] = useState(false);
   const [newMemberForm, setNewMemberForm] = useState(emptyNewMemberForm());
+
+  useEffect(() => {
+    if (readerOptions.length === 0) return;
+    if (readerOptions.some((o) => o.id === newMemberForm.faceIdTerminal)) return;
+    const fallback = (readerOptions.find((o) => o.online) ?? readerOptions[0]).id;
+    setNewMemberForm((prev) => ({ ...prev, faceIdTerminal: fallback }));
+  }, [readerOptions, newMemberForm.faceIdTerminal]);
   const [step1Errors, setStep1Errors] = useState<AddMemberStep1Errors>({});
   const [showPurchaseConfirmModal, setShowPurchaseConfirmModal] = useState(false);
 
@@ -789,6 +813,7 @@ export default function Members() {
   };
   const [searchTerm, setSearchTerm] = useState("");
   const [filterExpiry, setFilterExpiry] = useState<ExpiryFilter>("ALL");
+  const [filterNoFace, setFilterNoFace] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
   const [paymentModalMember, setPaymentModalMember] = useState<Member | null>(null);
@@ -1051,15 +1076,23 @@ export default function Members() {
     return counts;
   }, [searchMatchedMembers]);
 
+  const noFaceCount = useMemo(
+    () => searchMatchedMembers.filter((member) => !member.faceIdEnrolled).length,
+    [searchMatchedMembers],
+  );
+
   const filteredMembers = useMemo(() => {
-    const list =
+    const byExpiry =
       filterExpiry === "ALL"
         ? searchMatchedMembers
         : searchMatchedMembers.filter(
             (member) => getExpiryLevel(member.renewalDate) === filterExpiry,
           );
+    const list = filterNoFace
+      ? byExpiry.filter((member) => !member.faceIdEnrolled)
+      : byExpiry;
     return sortMembersByDateAddedDesc(list);
-  }, [searchMatchedMembers, filterExpiry]);
+  }, [searchMatchedMembers, filterExpiry, filterNoFace]);
 
   // Pagination
   const totalPages = Math.ceil(filteredMembers.length / ITEMS_PER_PAGE);
@@ -2017,6 +2050,26 @@ export default function Members() {
                   </button>
                 );
               })}
+              <button
+                type="button"
+                onClick={() => handleFilterChange(setFilterNoFace, !filterNoFace)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded border text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                  filterNoFace
+                    ? "bg-[#ffa500]/15 border-[#ffa500]/50 text-[#e5e2e1]"
+                    : "bg-[#131313] border-[rgba(93,63,60,0.2)] text-[#808080] hover:border-[rgba(93,63,60,0.45)] hover:text-[#e5e2e1]"
+                }`}
+                title="Miembros que aún no registran su rostro"
+              >
+                <ScanFace size={12} className="text-[#ffa500]" />
+                Sin rostro
+                <span
+                  className={`tabular-nums text-[9px] px-1.5 py-0.5 rounded ${
+                    filterNoFace ? "bg-[#ffa500]/25 text-white" : "bg-[#1a1a1a] text-[#5a5a5a]"
+                  }`}
+                >
+                  {noFaceCount}
+                </span>
+              </button>
             </div>
           </div>
         </div>
@@ -2035,7 +2088,7 @@ export default function Members() {
               <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Vigencia</span>
             </div>
             <div className="col-span-1 text-center">
-              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Visitas</span>
+              <span className="text-[#808080] text-[9px] font-bold tracking-[1px] uppercase">Rostro</span>
             </div>
             <div className="col-span-1" aria-hidden />
           </div>
@@ -2049,14 +2102,17 @@ export default function Members() {
           ) : currentMembers.length === 0 ? (
             <div className="py-12 text-center">
               <p className="text-[#808080] text-[14px]">
-                {filterExpiry !== "ALL"
-                  ? "Ningún miembro coincide con este filtro de vigencia"
+                {filterExpiry !== "ALL" || filterNoFace
+                  ? "Ningún miembro coincide con este filtro"
                   : "No se encontraron miembros"}
               </p>
-              {filterExpiry !== "ALL" && (
+              {(filterExpiry !== "ALL" || filterNoFace) && (
                 <button
                   type="button"
-                  onClick={() => handleFilterChange(setFilterExpiry, "ALL")}
+                  onClick={() => {
+                    setFilterNoFace(false);
+                    handleFilterChange(setFilterExpiry, "ALL");
+                  }}
                   className="mt-3 text-[#e31e24] text-[11px] font-bold uppercase tracking-wide hover:underline"
                 >
                   Ver todos
@@ -2115,8 +2171,17 @@ export default function Members() {
                     <MemberExpiryIndicator member={member} layout="twoRow" />
                   </div>
                   <div className="col-span-1 flex flex-col items-center justify-center gap-0.5">
-                    <span className="text-[#808080] text-[8px] uppercase tracking-wide">Vis.</span>
-                    <span className="text-[#e5e2e1] text-[13px] font-bold tabular-nums">{member.monthlyVisits}</span>
+                    <ScanFace
+                      size={16}
+                      className={member.faceIdEnrolled ? "text-[#69f0ae]" : "text-[#ffa500]"}
+                    />
+                    <span
+                      className={`text-[9px] font-bold uppercase tracking-wide ${
+                        member.faceIdEnrolled ? "text-[#69f0ae]" : "text-[#ffa500]"
+                      }`}
+                    >
+                      {member.faceIdEnrolled ? "Listo" : "Falta"}
+                    </span>
                   </div>
                   <div className="col-span-1 flex items-center justify-end pr-1">
                     {isExpanded ? (
@@ -2174,8 +2239,13 @@ export default function Members() {
                     <span className="text-[#808080]">
                       Alta · {formatRenewalDate(member.enrollmentDate)}
                     </span>
-                    <span className="text-[#808080] tabular-nums">
-                      <span className="text-[#e5e2e1] font-bold">{member.monthlyVisits}</span> visitas
+                    <span
+                      className={`inline-flex items-center gap-1 font-bold ${
+                        member.faceIdEnrolled ? "text-[#69f0ae]" : "text-[#ffa500]"
+                      }`}
+                    >
+                      <ScanFace size={12} />
+                      {member.faceIdEnrolled ? "Con rostro" : "Sin rostro"}
                     </span>
                   </div>
                 </div>
@@ -2206,6 +2276,18 @@ export default function Members() {
                       >
                         <ShoppingCart size={14} />
                         Vender en tienda
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate("/access-control", {
+                            state: { enrollMemberId: member.id },
+                          })
+                        }
+                        className="inline-flex items-center justify-center gap-2 bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] px-4 py-2.5 text-[10px] font-bold tracking-[1px] uppercase hover:border-[#e31e24] transition-colors"
+                      >
+                        <ScanFace size={14} />
+                        {member.faceIdEnrolled ? "Reemplazar rostro" : "Registrar rostro"}
                       </button>
                     </div>
                     <div className="w-full flex flex-wrap items-center gap-x-4 gap-y-2 rounded border border-[rgba(93,63,60,0.12)] bg-[#131313] px-4 py-3">
@@ -2302,12 +2384,10 @@ export default function Members() {
                               <span className="text-[#808080] text-[10px]">FACE_ID_STATUS</span>
                               <span
                                 className={`text-[11px] font-bold ${
-                                  member.faceIdEnrolled === false
-                                    ? "text-[#ffa500]"
-                                    : "text-[#00ff00]"
+                                  member.faceIdEnrolled ? "text-[#00ff00]" : "text-[#ffa500]"
                                 }`}
                               >
-                                {member.faceIdEnrolled === false ? "PENDIENTE" : "ENROLLED"}
+                                {member.faceIdEnrolled ? "ENROLLED" : "PENDIENTE"}
                               </span>
                             </div>
                             {member.faceIdTemplateId ? (
@@ -2321,7 +2401,7 @@ export default function Members() {
                             <div className="flex items-center justify-between gap-3 rounded border border-[rgba(93,63,60,0.12)] bg-[#0e0e0e] px-3 py-2.5">
                               <span className="text-[#808080] text-[10px]">ÚLT_SYNC</span>
                               <span className="text-[#e5e2e1] text-[11px] font-bold">
-                                {member.faceIdEnrolled === false ? "—" : "Activo"}
+                                {member.faceIdEnrolled ? "Activo" : "—"}
                               </span>
                             </div>
                           </div>
@@ -2332,13 +2412,13 @@ export default function Members() {
                             Estadísticas de actividad
                           </p>
                           <div className="space-y-4">
-                            <div>
-                              <p className="text-[#808080] text-[10px] mb-1">Visitas del mes</p>
-                              <p className="text-[#e5e2e1] text-[16px] font-black">{member.monthlyVisits}</p>
-                            </div>
-                            <div>
-                              <p className="text-[#808080] text-[10px] mb-1">Tiempo promedio de sesión</p>
-                              <p className="text-[#e5e2e1] text-[16px] font-black">{member.avgSessionTime} min</p>
+                            <div className="rounded border border-[rgba(93,63,60,0.12)] bg-[#0e0e0e] px-3 py-2.5">
+                              <p className="text-[#808080] text-[10px] mb-1">Visitas y asistencias</p>
+                              <p className="text-[#e7bdb8] text-[12px] font-bold">Disponible pronto</p>
+                              <p className="text-[#5a5a5a] text-[10px] mt-1 leading-relaxed">
+                                El historial de asistencias se mostrará aquí cuando se active el
+                                registro permanente de accesos.
+                              </p>
                             </div>
                             <div>
                               <p className="text-[#808080] text-[10px] mb-1">Miembro desde</p>
@@ -3869,8 +3949,12 @@ export default function Members() {
                         disabled={Boolean(pendingFaceIdCatalog) || Boolean(wizardSync)}
                         className="w-full box-border bg-[#131313] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-3 py-2.5 focus:border-[#e31e24] focus:outline-none text-[12px] disabled:opacity-50"
                       >
-                        <option value="TRN-MAIN-01">TRN-MAIN-01 — Entrada principal</option>
-                        <option value="TRN-MAIN-02">TRN-MAIN-02 — Entrada lateral</option>
+                        {readerOptions.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.label}
+                            {o.online ? "" : " (desconectado)"}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>

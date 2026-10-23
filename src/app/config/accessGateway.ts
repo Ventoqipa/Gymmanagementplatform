@@ -28,9 +28,12 @@ export const accessGatewayConfig = {
   eventsPath: "/v1/events",
   eventsStreamPath: "/v1/events/stream",
   activityPath: "/v1/activity",
+  admsTracePath: "/v1/adms/trace",
   diagnosticsPath: "/v1/diagnostics",
   diagnosticsRunPath: "/v1/diagnostics/run",
   reconnectPath: "/v1/reconnect",
+  terminalRenamePath: "/v1/terminals/rename",
+  terminalRemovePath: "/v1/terminals/remove",
   /** Polling del muro de accesos (ms) cuando hay Gateway. */
   eventsPollMs: 2500,
   /** Calidad mínima sugerida (0–1). */
