@@ -10,18 +10,51 @@ import {
   PlugZap,
   Radio,
   RefreshCw,
+  TerminalSquare,
   Trash2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  fetchAdmsTrace,
   fetchGatewayActivity,
   removeGatewayTerminal,
   renameGatewayTerminal,
+  type AdmsTraceResponse,
+  type AdmsTraceRow,
   type GatewayActivityRow,
   type GatewayTerminal,
 } from "../core/accessGateway";
 import { useAccessGatewayStatus } from "../context/AccessGatewayStatusContext";
+
+type TraceFilter = "all" | "data" | "photo";
+type ConfigTab = "devices" | "activity" | "trace";
+
+function traceBadgeClass(handledAs?: string): string {
+  const h = (handledAs || "").toLowerCase();
+  if (h.includes("attphoto")) return "text-[#7dd3fc] border-[rgba(125,211,252,0.35)]";
+  if (h.includes("attlog")) return "text-[#00ff00] border-[rgba(0,255,0,0.3)]";
+  if (h.includes("handshake") || h.includes("registry")) {
+    return "text-[#c8c8c8] border-[rgba(200,200,200,0.25)]";
+  }
+  if (h.includes("unparsed") || h.includes("error") || h.includes("not-found")) {
+    return "text-[#e31e24] border-[rgba(227,30,36,0.35)]";
+  }
+  return "text-[#808080] border-[rgba(93,63,60,0.3)]";
+}
+
+function formatTraceLine(row: AdmsTraceRow): string {
+  const parts = [
+    row.method,
+    row.path,
+    row.table ? `table=${row.table}` : null,
+    row.serial ? `SN=${row.serial}` : null,
+    row.bytes ? `${row.bytes}B` : null,
+    row.jpeg ? "JPEG" : null,
+    row.photoAttached ? "foto✓" : null,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString("es-MX", {
@@ -139,6 +172,11 @@ export default function AccessHardware() {
   const [activity, setActivity] = useState<GatewayActivityRow[]>([]);
   const [activityLoading, setActivityLoading] = useState(true);
   const [activityError, setActivityError] = useState("");
+  const [configTab, setConfigTab] = useState<ConfigTab>("devices");
+  const [traceFilter, setTraceFilter] = useState<TraceFilter>("data");
+  const [trace, setTrace] = useState<AdmsTraceResponse | null>(null);
+  const [traceLoading, setTraceLoading] = useState(true);
+  const [traceError, setTraceError] = useState("");
   const [panelBusy, setPanelBusy] = useState(false);
   const [banner, setBanner] = useState("");
 
@@ -169,18 +207,55 @@ export default function AccessHardware() {
     }
   }, [online]);
 
+  const loadTrace = useCallback(async () => {
+    setTraceLoading(true);
+    setTraceError("");
+    try {
+      if (!online) {
+        setTrace(null);
+        setTraceError(
+          "Sin conexión: la traza ADMS aparecerá cuando el Gateway esté conectado.",
+        );
+        return;
+      }
+      const data = await fetchAdmsTrace({
+        limit: 100,
+        only: traceFilter,
+        hideNoise: traceFilter !== "all",
+      });
+      if (!data) {
+        setTrace(null);
+        setTraceError(
+          "No se pudo cargar la traza. Actualice el Gateway a la versión con /v1/adms/trace.",
+        );
+        return;
+      }
+      setTrace(data);
+    } catch {
+      setTraceError("No se pudo cargar la traza ADMS. Intente Actualizar.");
+    } finally {
+      setTraceLoading(false);
+    }
+  }, [online, traceFilter]);
+
   useEffect(() => {
     void loadActivity();
     const id = window.setInterval(() => void loadActivity(), 4000);
     return () => window.clearInterval(id);
   }, [loadActivity]);
 
+  useEffect(() => {
+    void loadTrace();
+    const id = window.setInterval(() => void loadTrace(), 4000);
+    return () => window.clearInterval(id);
+  }, [loadTrace]);
+
   const onRefresh = async () => {
     setPanelBusy(true);
-    setBanner("Actualizando estado y actividad…");
+    setBanner("Actualizando estado, actividad y traza ADMS…");
     try {
       await refreshStatus();
-      await loadActivity();
+      await Promise.all([loadActivity(), loadTrace()]);
       toast.message("Información actualizada");
       setBanner("Datos actualizados.");
     } finally {
@@ -191,7 +266,7 @@ export default function AccessHardware() {
   const onReconnect = async () => {
     setBanner("Reconectando… espere un momento.");
     const result = await reconnect();
-    await loadActivity();
+    await Promise.all([loadActivity(), loadTrace()]);
     if (result.ok) {
       toast.success(result.message);
       setBanner(result.message);
@@ -203,9 +278,22 @@ export default function AccessHardware() {
 
   const location = useLocation();
   const navigate = useNavigate();
-  const navState = location.state as { autoCheck?: boolean; from?: string } | null;
+  const navState = location.state as {
+    autoCheck?: boolean;
+    from?: string;
+    tab?: ConfigTab;
+  } | null;
   const returnTo = navState?.from === "/access-control" ? navState.from : null;
   const autoCheckDone = useRef(false);
+  const tabFromNavDone = useRef(false);
+
+  useEffect(() => {
+    if (tabFromNavDone.current) return;
+    if (navState?.tab === "devices" || navState?.tab === "activity" || navState?.tab === "trace") {
+      tabFromNavDone.current = true;
+      setConfigTab(navState.tab);
+    }
+  }, [navState?.tab]);
 
   useEffect(() => {
     if (!navState?.autoCheck || autoCheckDone.current) return;
@@ -261,10 +349,11 @@ export default function AccessHardware() {
       <div className="mb-5 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
           <h1 className="text-[#e5e2e1] text-[22px] md:text-[30px] font-black tracking-[-0.5px] uppercase leading-tight">
-            Panel
+            Configuración
           </h1>
           <p className="text-[#808080] text-[13px] mt-1 max-w-xl">
-            Lectores, actividad reciente y reconexión del sistema de acceso.
+            Lectores, actividad y traza ADMS del sistema de acceso. Use Reconectar
+            si la conexión se cae.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -359,17 +448,33 @@ export default function AccessHardware() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Radio className="text-[#e31e24]" size={18} />
-            <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
-              Dispositivos
-            </p>
-            {checking ? (
-              <Loader2 size={14} className="animate-spin text-[#808080]" />
-            ) : null}
-          </div>
+      <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)]">
+        <div className="flex flex-wrap border-b border-[rgba(93,63,60,0.15)]">
+          {(
+            [
+              ["devices", "Dispositivos", Radio],
+              ["activity", "Actividad", Activity],
+              ["trace", "Traza ADMS", TerminalSquare],
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setConfigTab(id)}
+              className={`inline-flex items-center gap-2 px-4 py-3 text-[11px] font-bold uppercase tracking-wide border-b-2 -mb-px ${
+                configTab === id
+                  ? "border-[#e31e24] text-[#e31e24]"
+                  : "border-transparent text-[#808080] hover:text-[#e5e2e1]"
+              }`}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {configTab === "devices" ? (
+        <div className="p-5">
           <p className="text-[#5a5a5a] text-[12px] mb-4">
             Los lectores aparecen solos en cuanto se conectan. Use el lápiz para ponerle a
             cada uno un nombre fácil de reconocer.
@@ -502,18 +607,19 @@ export default function AccessHardware() {
             </div>
           )}
         </div>
+        ) : null}
 
-        <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-5">
+        {configTab === "activity" ? (
+        <div className="p-5">
           <div className="flex items-center gap-2 mb-4">
-            <Activity className="text-[#e31e24]" size={18} />
-            <p className="text-[#e31e24] text-[10px] font-bold tracking-[2px] uppercase">
-              Actividad
-            </p>
             {activityLoading ? (
               <Loader2 size={14} className="animate-spin text-[#808080]" />
             ) : null}
+            <p className="text-[#5a5a5a] text-[12px]">
+              Movimientos recientes del sistema de acceso (lenguaje sencillo).
+            </p>
           </div>
-          <div className="max-h-[380px] overflow-auto space-y-2">
+          <div className="max-h-[480px] overflow-auto space-y-2">
             {activityLoading && activity.length === 0 ? (
               <div className="flex items-center gap-2 text-[#808080] text-[14px] py-6">
                 <Loader2 size={16} className="animate-spin" />
@@ -543,6 +649,127 @@ export default function AccessHardware() {
             )}
           </div>
         </div>
+        ) : null}
+
+        {configTab === "trace" ? (
+        <div className="p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <p className="text-[#5a5a5a] text-[12px] max-w-2xl">
+              Peticiones crudas que mandan los lectores al Gateway (ADMS). Sirve
+              para ver si llegan ATTLOG, ATTPHOTO o solo pings.
+            </p>
+            <div className="flex flex-wrap gap-2 shrink-0">
+              {(
+                [
+                  ["data", "Solo datos"],
+                  ["photo", "Fotos"],
+                  ["all", "Todo"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTraceFilter(id)}
+                  className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wide border ${
+                    traceFilter === id
+                      ? "border-[#e31e24] text-[#e31e24] bg-[rgba(227,30,36,0.08)]"
+                      : "border-[rgba(93,63,60,0.25)] text-[#808080] hover:text-[#e5e2e1]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {traceLoading ? (
+            <div className="flex items-center gap-2 text-[#808080] text-[12px] mb-3">
+              <Loader2 size={14} className="animate-spin" />
+              Actualizando traza…
+            </div>
+          ) : null}
+
+          {trace ? (
+            <div className="flex flex-wrap gap-3 mb-4 text-[11px] text-[#808080]">
+              <span>
+                En memoria:{" "}
+                <span className="text-[#e5e2e1] font-bold">{trace.total}</span>
+              </span>
+              <span>
+                JPEG detectados:{" "}
+                <span className="text-[#e5e2e1] font-bold">{trace.withJpeg}</span>
+              </span>
+              <span>
+                Fotos adjuntas:{" "}
+                <span className="text-[#e5e2e1] font-bold">{trace.withPhoto}</span>
+              </span>
+              {Object.entries(trace.byHandled)
+                .slice(0, 8)
+                .map(([k, n]) => (
+                  <span key={k} className="font-mono text-[10px]">
+                    {k}:{n}
+                  </span>
+                ))}
+            </div>
+          ) : null}
+
+          {trace?.hint && (trace.trace.length === 0 || !trace.byHandled.attlog) ? (
+            <p className="text-[#808080] text-[12px] mb-3 border border-[rgba(93,63,60,0.2)] px-3 py-2">
+              {trace.hint}
+            </p>
+          ) : null}
+
+          <div className="max-h-[480px] overflow-auto space-y-2 font-mono">
+            {traceLoading && !trace ? (
+              <div className="flex items-center gap-2 text-[#808080] text-[14px] py-6 font-sans">
+                <Loader2 size={16} className="animate-spin" />
+                Cargando traza…
+              </div>
+            ) : traceError ? (
+              <p className="text-[#e31e24] text-[14px] font-sans">{traceError}</p>
+            ) : !trace || trace.trace.length === 0 ? (
+              <p className="text-[#808080] text-[14px] font-sans">
+                Sin entradas en este filtro. Pase un socio por el lector o elija
+                “Todo” para ver pings y handshakes.
+              </p>
+            ) : (
+              trace.trace.map((row) => (
+                <div
+                  key={row.id}
+                  className="border-b border-[rgba(93,63,60,0.08)] pb-2"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[#5a5a5a] text-[11px] tabular-nums">
+                      {formatTime(row.atIso)}
+                    </span>
+                    <span
+                      className={`text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 border ${traceBadgeClass(row.handledAs)}`}
+                    >
+                      {row.handledAs || "—"}
+                    </span>
+                    <span className="text-[#c8c8c8] text-[11px]">
+                      {formatTraceLine(row)}
+                    </span>
+                  </div>
+                  {row.preview ? (
+                    <p className="text-[#5a5a5a] text-[10px] mt-1 break-all">
+                      {row.preview}
+                    </p>
+                  ) : null}
+                  {row.note ? (
+                    <p className="text-[#808080] text-[10px] mt-0.5">{row.note}</p>
+                  ) : null}
+                  {row.query ? (
+                    <p className="text-[#393939] text-[9px] mt-0.5 break-all">
+                      ?{row.query}
+                    </p>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+        ) : null}
       </div>
     </div>
   );

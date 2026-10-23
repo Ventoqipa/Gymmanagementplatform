@@ -36,7 +36,7 @@ type AccessGatewayStatusValue = {
   reconnecting: boolean;
   /** Aplica la lista devuelta por el Gateway tras renombrar/quitar un lector. */
   applyTerminals: (list: GatewayTerminal[]) => void;
-  /** Nombre visible del lector (el que se puso en Panel). */
+  /** Nombre visible del lector (el que se puso en Configuración). */
   terminalLabel: (terminalId: string) => string;
 };
 
@@ -57,7 +57,7 @@ function buildInfoMessage(options: {
   devicesTotal: number;
 }): string {
   if (!options.online) {
-    return "Sin conexión con el sistema de acceso. Pulse Reconectar en Panel.";
+    return "Sin conexión con el sistema de acceso. Pulse Reconectar en Configuración.";
   }
   if (options.devicesTotal === 0) {
     return "Sistema conectado. Aún no hay lectores reportados.";
@@ -125,7 +125,7 @@ export function AccessGatewayStatusProvider({
       setStatus("disconnected");
       setDevicesOnline(0);
       setInfoMessage(
-        "No se pudo comprobar la conexión. Pulse Reconectar en Panel.",
+        "No se pudo comprobar la conexión. Pulse Reconectar en Configuración.",
       );
     } finally {
       setChecking(false);

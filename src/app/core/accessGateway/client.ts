@@ -405,6 +405,61 @@ export async function fetchGatewayActivity(limit = 40): Promise<GatewayActivityR
   }
 }
 
+export type AdmsTraceRow = {
+  id: string;
+  atIso: string;
+  method?: string;
+  path?: string;
+  serial?: string;
+  table?: string;
+  query?: string;
+  bytes?: number;
+  contentType?: string;
+  handledAs?: string;
+  noise?: boolean;
+  jpeg?: boolean;
+  photoAttached?: boolean;
+  preview?: string;
+  note?: string;
+};
+
+export type AdmsTraceResponse = {
+  ok: boolean;
+  total: number;
+  withJpeg: number;
+  withPhoto: number;
+  byHandled: Record<string, number>;
+  byTable: Record<string, number>;
+  trace: AdmsTraceRow[];
+  hint?: string;
+};
+
+export async function fetchAdmsTrace(options?: {
+  limit?: number;
+  /** "all" | "data" | "photo" */
+  only?: "all" | "data" | "photo";
+  hideNoise?: boolean;
+}): Promise<AdmsTraceResponse | null> {
+  if (!isAccessGatewayConfigured()) return null;
+  try {
+    const limit = Math.min(200, options?.limit ?? 80);
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (options?.hideNoise) params.set("noise", "0");
+    if (options?.only && options.only !== "all") params.set("only", options.only);
+    const response = await fetch(
+      accessGatewayUrl(`${accessGatewayConfig.admsTracePath}?${params}`),
+      { method: "GET", headers: { Accept: "application/json" } },
+    );
+    if (!response.ok) return null;
+    const body = (await parseJsonSafe(response)) as AdmsTraceResponse | null;
+    if (!body || !Array.isArray(body.trace)) return null;
+    return body;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchGatewayDiagnostics(options?: {
   netstat?: boolean;
 }): Promise<GatewayDiagnostics | null> {
