@@ -1,209 +1,277 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { createPointOrder, checkPaymentStatus, cancelPointOrder } from '../api/pointPaymentService';
-
-const ACTIVE_POINT_SALE_KEY = 'active_point_sale_intent';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+    createPointOrder,
+    checkPaymentStatus,
+    cancelPointOrder,
+    getPaymentTerminals,      // NUEVO
+    type PaymentStatus,       // NUEVO
+    type PaymentTerminal,     // NUEVO
+} from '../api/pointPaymentService';
 
 interface CheckoutModalProps {
-  saleId: string;
-  amount: number;
-  terminalId?: string;
-  onSuccess: () => void;
-  onClose: () => void;
+    saleId: string;
+    onClose: () => void;
+    // CAMBIO: recibe las cuotas (opcional, así no rompe a quien ya usa onSuccess())
+    onSuccess: (info?: { installments: number }) => void;
 }
 
-export const CheckoutModal: React.FC<CheckoutModalProps> = ({
-  saleId,
-  amount,
-  terminalId = 'NEWLAND_N950__N950NCC102544496',
-  onSuccess,
-  onClose,
-}) => {
-  const [loading, setLoading] = useState(true);
-  const [paymentStatus, setPaymentStatus] = useState<'waiting' | 'processed' | 'error'>('waiting');
-  const [statusMessage, setStatusMessage] = useState('Enviando orden a la terminal Point...');
+// CAMBIO: 'loading' para recuperar estado, 'canceled' y 'refunded'
+type PaymentPhase =
+    | 'loading' | 'idle' | 'sending' | 'waiting'
+    | 'approved' | 'rejected' | 'canceled' | 'expired' | 'refunded';
 
-  const currentIntentIdRef = useRef<string | null>(null);
-  const pollAttemptsRef = useRef(0);
-  const MAX_POLL_ATTEMPTS = 45; // Límite de 90 segundos (45 intentos * 2s)
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+// CAMBIO: CANCELED y EXPIRED como los manda el backend
+const FINAL_STATUSES: PaymentStatus[] = ['APPROVED', 'REJECTED', 'CANCELED', 'EXPIRED', 'REFUNDED'];
+const POLL_INTERVAL_MS = 3000;
+const MAX_WAIT_MS = 11 * 60 * 1000; // la orden expira a los 10 min; 1 min de margen
 
-  const stopPolling = () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-  };
+// NUEVO: mensajes según la tabla de estados del documento
+const waitingMessage = (mpStatus?: string | null) =>
+    mpStatus === 'action_required'
+        ? 'Procesando… siga las indicaciones de la terminal.'
+        : 'Pida al socio que pague en la terminal.';
 
-  const clearActiveSaleStorage = () => {
-    localStorage.removeItem(ACTIVE_POINT_SALE_KEY);
-  };
+export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, onSuccess }) => {
+    const [phase, setPhase] = useState<PaymentPhase>('loading');
+    const [statusMessage, setStatusMessage] = useState('Consultando estado del cobro…');
+    const [terminals, setTerminals] = useState<PaymentTerminal[]>([]); // NUEVO
+    const [terminalId, setTerminalId] = useState('');
 
-  const handleStartPayment = async () => {
-    stopPolling();
-    pollAttemptsRef.current = 0;
+    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const abortRef = useRef<AbortController | null>(null);
+    const startedAtRef = useRef<number>(0);
 
-    let currentSaleId = saleId;
-    if (paymentStatus === 'error') {
-      currentSaleId = `${saleId}_R${Date.now().toString().slice(-4)}`;
-    }
+    const busy = phase === 'loading' || phase === 'sending' || phase === 'waiting';
+    const canRetry = phase === 'rejected' || phase === 'canceled' || phase === 'expired';
 
-    setStatusMessage('Enviando orden a la terminal Point...');
-    setPaymentStatus('waiting');
-    setLoading(true);
-
-    try {
-      const response = await createPointOrder({ saleId: currentSaleId, amount, terminalId });
-      
-      if (response.intentId) {
-        currentIntentIdRef.current = response.intentId;
-      }
-
-      // Guardar venta activa en localStorage para resistir recargas (F5)
-      localStorage.setItem(
-        ACTIVE_POINT_SALE_KEY,
-        JSON.stringify({
-          saleId: currentSaleId,
-          amount,
-          terminalId,
-          timestamp: Date.now(),
-        })
-      );
-
-      setStatusMessage('Esperando a que el cliente deslice/acerque su tarjeta en la terminal...');
-      startPolling(currentSaleId);
-    } catch (err: any) {
-      stopPolling();
-      clearActiveSaleStorage();
-      setPaymentStatus('error');
-      setStatusMessage(err.message || 'Error al conectar con la terminal');
-      setLoading(false);
-    }
-  };
-
-  const startPolling = (targetSaleId: string) => {
-    const checkStatus = async () => {
-      pollAttemptsRef.current += 1;
-
-      try {
-        const res = await checkPaymentStatus(targetSaleId);
-        const rawStatus = (res.status || '').toString().toUpperCase();
-
-        if (rawStatus === 'FINISHED' || rawStatus === 'PROCESSED') {
-          stopPolling();
-          clearActiveSaleStorage();
-          setPaymentStatus('processed');
-          setStatusMessage('¡Pago Aprobado con Éxito!');
-          setLoading(false);
-
-          setTimeout(() => {
-            onSuccess();
-          }, 1500);
-        } 
-        else if (['FAILED', 'CANCELED', 'REJECTED', 'EXPIRED', 'ERROR'].includes(rawStatus)) {
-          stopPolling();
-          clearActiveSaleStorage();
-          setPaymentStatus('error');
-          setStatusMessage('El pago fue rechazado o cancelado en la terminal.');
-          setLoading(false);
+    // Detiene el polling y aborta la petición en curso
+    const stopPolling = () => {
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
         }
-      } catch (err) {
-        // Ignorar errores puntuales de red durante el sondeo
-      }
+        abortRef.current?.abort();
+        abortRef.current = null;
+    };
 
-      if (pollAttemptsRef.current >= MAX_POLL_ATTEMPTS) {
+    // NUEVO: aplica el estado que regresa el POS API (la pantalla nunca decide "pagado")
+    // Devuelve true si el estado es final
+    const applyStatus = (data: Awaited<ReturnType<typeof checkPaymentStatus>>['data']): boolean => {
+        const status = data?.paymentStatus;
+        const installments = data?.installments ?? 1;
+        const detail = data?.mp_status_detail;
+
+        if (!status || !FINAL_STATUSES.includes(status)) {
+            setStatusMessage(waitingMessage(data?.mp_status));
+            return false;
+        }
+
         stopPolling();
-        clearActiveSaleStorage();
-        setPaymentStatus('error');
-        setStatusMessage('Tiempo de espera agotado o la tarjeta fue rechazada. Presiona Reintentar.');
-        setLoading(false);
-      }
-    };
-
-    checkStatus();
-    pollingRef.current = setInterval(checkStatus, 2000);
-  };
-
-  const handleCancel = async () => {
-    stopPolling();
-    clearActiveSaleStorage();
-    if (currentIntentIdRef.current) {
-      await cancelPointOrder(currentIntentIdRef.current, terminalId);
-    }
-    onClose();
-  };
-
-  useEffect(() => {
-    if (!saleId || amount <= 0) return;
-
-    const savedSaleRaw = localStorage.getItem(ACTIVE_POINT_SALE_KEY);
-    
-    if (savedSaleRaw) {
-      try {
-        const savedSale = JSON.parse(savedSaleRaw);
-        const tenMinutes = 10 * 60 * 1000;
-
-        if (savedSale.saleId.startsWith(saleId) && (Date.now() - savedSale.timestamp < tenMinutes)) {
-          setStatusMessage('Reanudando estado del cobro en la terminal...');
-          setPaymentStatus('waiting');
-          setLoading(true);
-          startPolling(savedSale.saleId);
-          return;
-        } else {
-          clearActiveSaleStorage();
+        switch (status) {
+            case 'APPROVED':
+                setPhase('approved');
+                setStatusMessage(installments > 1 ? `Pago aprobado · ${installments} MSI` : 'Pago aprobado');
+                setTimeout(() => onSuccess({ installments }), 1500);
+                break;
+            case 'REJECTED':
+                setPhase('rejected');
+                setStatusMessage(`Pago rechazado${detail ? ` (${detail})` : ''}, intente otro medio.`);
+                break;
+            case 'EXPIRED':
+                setPhase('expired');
+                setStatusMessage('Tiempo agotado, reintente.');
+                break;
+            case 'REFUNDED':
+                setPhase('refunded');
+                setStatusMessage('Pago reembolsado.');
+                break;
+            default:
+                setPhase('canceled');
+                setStatusMessage('Cobro cancelado.');
         }
-      } catch (e) {
-        clearActiveSaleStorage();
-      }
-    }
-
-    handleStartPayment();
-
-    return () => {
-      stopPolling();
+        return true;
     };
-  }, [saleId, amount]);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="w-full max-w-md p-6 bg-stone-900 border border-stone-800 rounded-xl shadow-2xl text-stone-100">
-        <h3 className="text-xl font-bold text-center mb-4 text-red-500">
-          Cobro con Mercado Pago Point
-        </h3>
+    // Polling periódico para consultar el estado del pago
+    const startPollingStatus = () => {
+        stopPolling();
+        abortRef.current = new AbortController();
+        startedAtRef.current = Date.now();
 
-        <div className="p-4 bg-stone-800/80 rounded-lg text-center mb-6 border border-stone-700/50">
-          <p className="text-sm text-stone-400">Total a Pagar</p>
-          <p className="text-3xl font-extrabold text-white">
-            ${amount.toFixed(2)} MXN
-          </p>
-          <p className="text-xs text-stone-500 mt-1">Orden #{saleId}</p>
+        intervalRef.current = setInterval(async () => {
+            if (Date.now() - startedAtRef.current > MAX_WAIT_MS) {
+                stopPolling();
+                setPhase('expired');
+                setStatusMessage('Tiempo agotado, reintente.');
+                return;
+            }
+
+            try {
+                const res = await checkPaymentStatus(saleId, abortRef.current?.signal);
+                applyStatus(res.data);
+            } catch (error: any) {
+                if (error?.name === 'AbortError') return;
+                console.error('Error consultando estatus del pago:', error);
+            }
+        }, POLL_INTERVAL_MS);
+    };
+
+    // NUEVO: al abrir, cargar terminales y recuperar un cobro en curso (p. ej. tras recargar)
+    useEffect(() => {
+        let cancelled = false;
+
+        (async () => {
+            try {
+                const termRes = await getPaymentTerminals();
+                const list = termRes.data ?? [];
+                if (!cancelled) {
+                    setTerminals(list);
+                    setTerminalId((prev) => prev || list[0]?.id || '');
+                }
+            } catch (error) {
+                console.error('No se pudieron cargar las terminales:', error);
+            }
+
+            try {
+                const res = await checkPaymentStatus(saleId);
+                if (cancelled) return;
+                const data = res.data;
+
+                if (data?.order_id && data.paymentStatus === 'PENDING') {
+                    setPhase('waiting');
+                    setStatusMessage(waitingMessage(data.mp_status));
+                    startPollingStatus();
+                } else if (!data?.order_id || !applyStatus(data)) {
+                    setPhase('idle');
+                    setStatusMessage('Listo para cobrar en terminal Mercado Pago');
+                }
+            } catch {
+                if (!cancelled) {
+                    setPhase('idle');
+                    setStatusMessage('Listo para cobrar en terminal Mercado Pago');
+                }
+            }
+        })();
+
+        // Limpia todo si el modal se desmonta
+        return () => {
+            cancelled = true;
+            stopPolling();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [saleId]);
+
+    // Iniciar cobro en la terminal física
+    const handleStartPayment = async () => {
+        if (!terminalId) {
+            setStatusMessage('Seleccione una terminal.');
+            return;
+        }
+        try {
+            setPhase('sending');
+            setStatusMessage('Enviando orden a la terminal…');
+
+            await createPointOrder({ saleId, terminalId });
+
+            setPhase('waiting');
+            setStatusMessage(waitingMessage('created'));
+            startPollingStatus();
+        } catch (error: any) {
+            console.error(error);
+            setPhase('idle');
+            setStatusMessage(error.message || 'La terminal no respondió. Puede reintentar o usar otro método.');
+        }
+    };
+
+    // Cancelar la orden si el usuario decide salir antes de tiempo
+    const handleCancel = async () => {
+        stopPolling();
+
+        if (phase === 'waiting') {
+            setStatusMessage('Cancelando orden en terminal…');
+            try {
+                await cancelPointOrder(saleId);
+            } catch (error) {
+                // Si la orden ya está en la terminal, Mercado Pago no deja cancelarla por API
+                console.warn('No se pudo cancelar por API; cancélela desde la terminal.', error);
+            }
+        }
+        onClose();
+    };
+
+    // NUEVO: aviso si la terminal no está en modo PDV
+    const selected = terminals.find((t) => t.id === terminalId);
+    const notPdv = !!selected?.operating_mode && selected.operating_mode !== 'PDV';
+
+    const messageColor =
+        phase === 'approved' ? 'text-green-700'
+        : canRetry ? 'text-red-600'
+        : 'text-gray-600';
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-96 shadow-xl">
+                <h3 className="text-xl font-bold mb-4 text-gray-800">Cobro con Terminal Mercado Pago</h3>
+
+                {/* CAMBIO: lista de terminales en lugar de input de texto */}
+                <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Terminal</label>
+                    <select
+                        value={terminalId}
+                        onChange={(e) => setTerminalId(e.target.value)}
+                        disabled={busy || phase === 'approved'}
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-gray-50"
+                    >
+                        {terminals.length === 0 && <option value="">Sin terminales disponibles</option>}
+                        {terminals.map((t) => (
+                            <option key={t.id} value={t.id}>
+                                {t.name || t.id}
+                            </option>
+                        ))}
+                    </select>
+                    {notPdv && (
+                        <p className="mt-1 text-xs text-red-600">
+                            La terminal no está en modo PDV ({selected?.operating_mode}); no recibirá cobros.
+                        </p>
+                    )}
+                </div>
+
+                <div className="bg-gray-50 p-4 rounded mb-6 text-center">
+                    <p className={`text-sm font-medium ${messageColor}`}>{statusMessage}</p>
+                    {busy && (
+                        <div className="mt-3 animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600 mx-auto"></div>
+                    )}
+                </div>
+
+                <div className="flex justify-end space-x-3">
+                    {phase === 'waiting' ? (
+                        <button
+                            onClick={handleCancel}
+                            className="w-full px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm font-medium"
+                        >
+                            Cancelar operación / Salir
+                        </button>
+                    ) : phase === 'approved' || phase === 'loading' ? null : (
+                        <>
+                            <button
+                                onClick={handleCancel}
+                                className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm font-medium"
+                            >
+                                Cerrar
+                            </button>
+                            {phase !== 'refunded' && (
+                                <button
+                                    onClick={handleStartPayment}
+                                    disabled={busy || !terminalId}
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm font-medium disabled:opacity-50"
+                                >
+                                    {phase === 'sending' ? 'Procesando…' : canRetry ? 'Reintentar cobro' : 'Cobrar'}
+                                </button>
+                            )}
+                        </>
+                    )}
+                </div>
+            </div>
         </div>
-
-        <div className="text-center py-4">
-          {loading && (
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-red-500 border-t-transparent mb-4"></div>
-          )}
-          <p className={`text-sm ${paymentStatus === 'error' ? 'text-red-400 font-semibold' : 'text-stone-300'}`}>
-            {statusMessage}
-          </p>
-        </div>
-
-        <div className="mt-6 flex justify-end gap-3">
-          {paymentStatus === 'error' && (
-            <button
-              onClick={handleStartPayment}
-              className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition shadow-md"
-            >
-              Reintentar Cobro
-            </button>
-          )}
-          <button
-            onClick={handleCancel}
-            className="px-4 py-2 text-sm bg-stone-700 hover:bg-stone-600 rounded-lg font-medium transition"
-          >
-            {paymentStatus === 'processed' ? 'Cerrar' : 'Cancelar'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+    );
 };
