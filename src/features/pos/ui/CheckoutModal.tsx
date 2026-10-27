@@ -190,11 +190,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
         if (phase === 'waiting') {
             setStatusMessage('Cancelando orden en terminal…');
             try {
-                if (!(await cancelPointOrder(saleId))) {
-                    startPollingStatus();
-                    setStatusMessage('No se pudo cancelar. Cancele el cobro desde la terminal antes de cerrar.');
-                    return;
-                }
+                await cancelPointOrder(saleId);
             } catch (error) {
                 // Si la orden ya está en la terminal, Mercado Pago no deja cancelarla por API
                 console.warn('No se pudo cancelar por API; cancélela desde la terminal.', error);
