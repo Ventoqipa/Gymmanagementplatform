@@ -13,11 +13,15 @@ import {
   User,
   X,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react"; // CAMBIO
 import { usePosTerminal } from "../hooks/usePosTerminal";
 import type { LinkedCustomer } from "../domain/types";
 import { PosTicketModal } from "./PosTicketModal";
 import { CheckoutModal } from "./CheckoutModal";
+import { PendingPaymentsPanel } from "./PendingPaymentsPanel"; // NUEVO
+
+// NUEVO: venta que se está cobrando con la terminal (sobrevive a recargar la página)
+const ACTIVE_CHECKOUT_KEY = "pos_active_checkout_sale";
 
 const PAYMENT_ICONS = {
   CARD: CreditCard,
@@ -228,8 +232,39 @@ function CustomerSaleDropdown({ pos, labels, className = "" }: CustomerSaleDropd
 export function PosTerminal() {
   const pos = usePosTerminal();
   const { labels } = pos;
-  const canCheckout = pos.cart.length > 0 && Boolean(pos.paymentMethod);
+  const canCheckout = pos.cart.length > 0 && Boolean(pos.paymentMethod) && !pos.checkingOut;
   const showCheckoutDock = pos.cart.length > 0;
+
+  //  venta recuperada al recargar, o elegida desde "Cobros pendientes"
+  const [resumeSaleId, setResumeSaleId] = useState<string | null>(() =>
+    localStorage.getItem(ACTIVE_CHECKOUT_KEY)
+  );
+  const [pendingRefresh, setPendingRefresh] = useState(0);
+
+  //  cobro recién creado desde el carrito; se recuerda por si se recarga la página
+  useEffect(() => {
+    if (pos.showPointModal && pos.currentSaleId) {
+      localStorage.setItem(ACTIVE_CHECKOUT_KEY, pos.currentSaleId);
+    }
+  }, [pos.showPointModal, pos.currentSaleId]);
+
+  //  el cobro del carrito tiene prioridad; si no hay, se usa la venta recuperada
+  const cartSaleId = pos.showPointModal && pos.currentSaleId ? pos.currentSaleId : null;
+  const activeSaleId = cartSaleId ?? resumeSaleId;
+
+  // N
+  const resumeCheckout = useCallback((saleId: string) => {
+    localStorage.setItem(ACTIVE_CHECKOUT_KEY, saleId);
+    setResumeSaleId(saleId);
+  }, []);
+
+  // N
+  const closeCheckout = useCallback(() => {
+    localStorage.removeItem(ACTIVE_CHECKOUT_KEY);
+    setResumeSaleId(null);
+    pos.setShowPointModal(false);
+    setPendingRefresh((n) => n + 1); // la venta puede quedar pendiente: refrescar panel
+  }, [pos]);
 
   return (
     <div className={`h-full bg-[#131313] overflow-auto ${showCheckoutDock ? "pb-[11.5rem] lg:pb-8" : ""}`}>
@@ -248,6 +283,9 @@ export function PosTerminal() {
             </p>
           ) : null}
         </div>
+
+        {/* NUEVO: ventas con tarjeta sin cobrar */}
+        <PendingPaymentsPanel onResume={resumeCheckout} refreshKey={pendingRefresh} />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div
@@ -490,15 +528,21 @@ export function PosTerminal() {
         </div>
       )}
 
-      {/* Modal de Cobro con Terminal Point */}
-      {pos.showPointModal && pos.currentSaleId && (
-        <CheckoutModal 
-          saleId={pos.currentSaleId} 
-          onClose={() => pos.setShowPointModal(false)} 
+      {/* CAMBIO: modal de cobro con terminal Point (también se reabre al recargar) */}
+      {activeSaleId && (
+        <CheckoutModal
+          key={activeSaleId}
+          saleId={activeSaleId}
+          onClose={closeCheckout}
           onSuccess={() => {
-            pos.setShowPointModal(false);
-            pos.clearCart();
-          }} 
+            // Solo se vacía el carrito si se pagó la venta del carrito actual,
+            // no una venta pendiente retomada desde el panel
+            const paidCurrentCart = activeSaleId === cartSaleId;
+            closeCheckout();
+            if (paidCurrentCart) {
+              pos.clearCart();
+            }
+          }}
         />
       )}
 

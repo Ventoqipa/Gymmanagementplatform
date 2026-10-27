@@ -1,5 +1,5 @@
 import { PosApiError } from "../api/posHttpClient";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"; // CAMBIO: useRef
 import { generateProductSku } from "../domain/productId";
 import type {
   CartLine,
@@ -9,6 +9,9 @@ import type {
   ProductFormState,
 } from "../domain/types";
 import { usePosContext } from "../ui/PosProvider";
+
+// NUEVO: métodos que se cobran en la terminal Mercado Pago Point
+const TERMINAL_METHODS = ["CARD", "TERMINAL_MP"];
 
 const emptyForm = (category: string): ProductFormState => ({
   name: "",
@@ -21,6 +24,8 @@ export function usePosTerminal() {
   const { config, service, linkedCustomer } = usePosContext();
   const { labels, notify, defaultProductCategory, confirmDelete } = config;
 
+  type CheckoutResult = Awaited<ReturnType<typeof service.checkout>>; // NUEVO
+
   const [products, setProducts] = useState<PosProduct[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -32,10 +37,17 @@ export function usePosTerminal() {
   const [ticketReceipt, setTicketReceipt] = useState<PosTicketReceipt | null>(
     null,
   );
-  
-  // Nuevos estados para la integración de Terminal Point (Mercado Pago)
+
+  // Estados para la integración de Terminal Point (Mercado Pago)
   const [showPointModal, setShowPointModal] = useState(false);
   const [currentSaleId, setCurrentSaleId] = useState<string | null>(null);
+
+  // NUEVO: evita doble clic en "Cobrar" (doble venta)
+  const [checkingOut, setCheckingOut] = useState(false);
+  const checkingOutRef = useRef(false);
+
+  // NUEVO: venta con terminal creada desde el carrito actual (ticket guardado hasta aprobar)
+  const terminalSaleRef = useRef<{ saleId: string; result: CheckoutResult } | null>(null);
 
   const [newProduct, setNewProduct] = useState<ProductFormState>(() =>
     emptyForm(defaultProductCategory),
@@ -57,15 +69,15 @@ export function usePosTerminal() {
   const refreshProducts = useCallback(async () => {
     setProductsLoading(true);
     try {
-          const raw: any = await service.listProducts();
-    const rows = Array.isArray(raw) ? raw : (raw?.data ?? []);
-    setProducts(
-      rows.map((p: any) => ({
-        ...p,
-        price: Number(p.price),
-        stock: Number(p.stock),
-      })),
-    );
+      const raw: any = await service.listProducts();
+      const rows = Array.isArray(raw) ? raw : (raw?.data ?? []);
+      setProducts(
+        rows.map((p: any) => ({
+          ...p,
+          price: Number(p.price),
+          stock: Number(p.stock),
+        })),
+      );
     } catch (error) {
       const message =
         error instanceof PosApiError
@@ -315,6 +327,10 @@ export function usePosTerminal() {
 
   const handleCheckout = async () => {
     if (cart.length === 0 || !paymentMethod) return;
+    if (checkingOutRef.current) return; // NUEVO: ignora doble clic
+    checkingOutRef.current = true;
+    setCheckingOut(true);
+
     const member: LinkedCustomer | undefined =
       selectedCustomer?.id && selectedCustomer?.name
         ? { id: selectedCustomer.id, name: selectedCustomer.name }
@@ -322,23 +338,6 @@ export function usePosTerminal() {
     const payer = config.getSessionPayer?.() ?? undefined;
 
     try {
-      // Si el método de pago seleccionado es CARD, generamos la orden previa y abrimos el modal Point
-      if (paymentMethod === 'CARD') {
-        const result = await service.checkout(
-          cart,
-          paymentMethod,
-          member,
-          config.ivaRegimen,
-          payer ?? undefined,
-        );
-        
-        const saleId = result.sale?.id || 'SALE_' + Date.now();
-        setCurrentSaleId(saleId);
-        setShowPointModal(true);
-        return;
-      }
-
-      // Flujo normal para efectivo u otros métodos
       const result = await service.checkout(
         cart,
         paymentMethod,
@@ -346,6 +345,21 @@ export function usePosTerminal() {
         config.ivaRegimen,
         payer ?? undefined,
       );
+
+      // CAMBIO: tarjeta/terminal → la venta queda PENDING y se abre el modal Point.
+      // El ticket y el stock se actualizan hasta que el pago se aprueba.
+      if (TERMINAL_METHODS.includes(paymentMethod)) {
+        const saleId = result.sale?.id;
+        if (!saleId) {
+          throw new Error("La venta no devolvió un identificador.");
+        }
+        terminalSaleRef.current = { saleId, result };
+        setCurrentSaleId(saleId);
+        setShowPointModal(true);
+        return;
+      }
+
+      // Flujo normal para efectivo u otros métodos
       setProducts(result.products);
       setTicketReceipt(result.receipt);
       config.onSaleComplete?.(result.sale);
@@ -354,11 +368,48 @@ export function usePosTerminal() {
       });
       clearCart();
     } catch (error) {
-         console.error('checkout error:', error);
+      console.error("checkout error:", error);
       notify.error(
-        error instanceof PosApiError ? error.message : "No se pudo completar la venta.",
+        error instanceof PosApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "No se pudo completar la venta.",
       );
+    } finally {
+      checkingOutRef.current = false;
+      setCheckingOut(false);
     }
+  };
+
+  // NUEVO: el pago en terminal se aprobó (venta del carrito o retomada desde pendientes)
+  const completeTerminalSale = async (saleId: string, installments?: number | null) => {
+    const pending = terminalSaleRef.current;
+    const plan = installments && installments > 1 ? ` · ${installments} MSI` : "";
+
+    if (pending?.saleId === saleId) {
+      terminalSaleRef.current = null;
+      setCurrentSaleId(null);
+      setTicketReceipt(pending.result.receipt);
+      config.onSaleComplete?.(pending.result.sale);
+      clearCart();
+    }
+
+    notify.success("Pago aprobado", {
+      description: `Venta ${saleId} · Terminal MP${plan}`,
+    });
+    await refreshProducts(); // el backend descontó stock al aprobar
+  };
+
+  // NUEVO: se cerró el modal sin pago aprobado → la venta queda en "Cobros pendientes"
+  const abandonTerminalSale = (saleId: string) => {
+    if (terminalSaleRef.current?.saleId !== saleId) return;
+    terminalSaleRef.current = null;
+    setCurrentSaleId(null);
+    clearCart();
+    notify.info(`Venta ${saleId} sin cobrar`, {
+      description: "Puedes retomarla o anularla en Cobros pendientes.",
+    });
   };
 
   const closeAddModal = () => {
@@ -418,5 +469,8 @@ export function usePosTerminal() {
     showPointModal,
     setShowPointModal,
     currentSaleId,
+    checkingOut, // NUEVO
+    completeTerminalSale, // NUEVO
+    abandonTerminalSale, // NUEVO
   };
 }

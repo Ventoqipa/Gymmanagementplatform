@@ -11,7 +11,8 @@ export type PaymentStatus =
   | 'REJECTED'
   | 'CANCELED'
   | 'EXPIRED'
-  | 'REFUNDED';
+  | 'REFUNDED'
+  | 'VOIDED';
 
 export interface CreateOrderParams {
   saleId: string;
@@ -178,4 +179,51 @@ export async function refundPointOrder(saleId: string): Promise<RefundPointOrder
   }
 
   return data as RefundPointOrderResponse;
+}
+
+// Ventas con tarjeta sin pagar
+export interface PendingSale {
+  id: string;
+  ticketId?: string;
+  total: number;
+  paymentMethod: string;
+  paymentStatus: PaymentStatus | 'VOIDED';
+  linesSummary?: string | null;
+  payerName?: string | null;
+  memberName?: string | null;
+  dateIso: string;
+  transactionType?: string;
+  orderId?: string | null;
+  orderStatus?: string | null;
+  mpStatus?: string | null;
+  attempt?: number | null;
+}
+
+type PendingSalesResponse = ApiResponse & { data?: PendingSale[] };
+
+// GET /api/v1/sales/pending-payments
+export async function getPendingPayments(): Promise<PendingSalesResponse> {
+  const response = await fetch(`${API_BASE_URL}/sales/pending-payments`, {
+    headers: headers(),
+  });
+
+  const data = await parseJson(response);
+  if (!response.ok) {
+    throw new Error(getResponseMessage(data, 'Error al cargar los cobros pendientes'));
+  }
+  return data as PendingSalesResponse;
+}
+
+// POST /api/v1/sales/{saleId}/void
+export async function voidSale(saleId: string): Promise<ApiResponse> {
+  const response = await fetch(`${API_BASE_URL}/sales/${encodeURIComponent(saleId)}/void`, {
+    method: 'POST',
+    headers: headers(true),
+  });
+
+  const data = await parseJson(response);
+  if (!response.ok) {
+    throw new Error(getResponseMessage(data, 'No se pudo anular la venta'));
+  }
+  return data;
 }
