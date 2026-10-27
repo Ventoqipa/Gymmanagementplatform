@@ -13,10 +13,12 @@ import {
   User,
   X,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePosTerminal } from "../hooks/usePosTerminal";
 import type { LinkedCustomer } from "../domain/types";
 import { PosTicketModal } from "./PosTicketModal";
+import { CheckoutModal } from "./CheckoutModal";
+import { createPointOrder } from "../api/pointPaymentService";
 
 const PAYMENT_ICONS = {
   CARD: CreditCard,
@@ -28,10 +30,12 @@ type CheckoutDockProps = {
   pos: ReturnType<typeof usePosTerminal>;
   labels: ReturnType<typeof usePosTerminal>["labels"];
   canCheckout: boolean;
-  className?: string;
+  onOpenCheckoutModal: () => void;
+  className?: string; 
+  
 };
 
-function CheckoutDock({ pos, labels, canCheckout, className = "" }: CheckoutDockProps) {
+function CheckoutDock({ pos, labels, canCheckout, onOpenCheckoutModal, className = "" }: CheckoutDockProps) {
   return (
     <div
       className={`bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] p-3 sm:p-4 space-y-3 shadow-[0_-8px_32px_rgba(0,0,0,0.45)] ${className}`}
@@ -81,7 +85,13 @@ function CheckoutDock({ pos, labels, canCheckout, className = "" }: CheckoutDock
 
       <button
         type="button"
-        onClick={() => void pos.handleCheckout()}
+        onClick={() => {
+          if (pos.paymentMethod === "CARD") {
+            onOpenCheckoutModal(); // <--- Dispara el modal de Mercado Pago
+         }  else {
+          void pos.handleCheckout();
+         }
+        }}
         disabled={!canCheckout}
         className={`w-full flex items-center justify-center gap-2 py-3.5 text-[11px] font-bold tracking-[1.2px] uppercase transition-colors ${
           canCheckout
@@ -229,6 +239,33 @@ export function PosTerminal() {
   const { labels } = pos;
   const canCheckout = pos.cart.length > 0 && Boolean(pos.paymentMethod);
   const showCheckoutDock = pos.cart.length > 0;
+
+  // ESTADOS PARA EL MODAL DE MERCADO PAGO POINT:
+  const [isPointModalOpen, setIsPointModalOpen] = useState(false);
+  const [currentSaleId, setCurrentSaleId] = useState("");
+
+const handleOpenPointModal = async () => {
+  if (pos.paymentMethod === "CARD") {
+    const saleIdGenerado = `SALE-${Date.now().toString().slice(-6)}`;
+    const totalVenta = pos.total; // <--- Obtén el total real del carrito
+
+    setCurrentSaleId(saleIdGenerado);
+    setIsPointModalOpen(true);
+
+    // Si llamas a tu API PHP para crear la orden en pos_payments, envía totalVenta:
+    await createPointOrder({
+      saleId: saleIdGenerado,
+      amount: totalVenta, // <--- Pasa el total dinámico, no 150
+    });
+  } else {
+    void pos.handleCheckout();
+  }
+};
+
+  const handlePaymentSuccess = () => {
+    // Procesar la venta en el estado local tras confirmación del Webhook
+    void pos.handleCheckout();
+  };
 
   return (
     <div className={`h-full bg-[#131313] overflow-auto ${showCheckoutDock ? "pb-[11.5rem] lg:pb-8" : ""}`}>
@@ -470,10 +507,10 @@ export function PosTerminal() {
             </div>
 
             {showCheckoutDock && (
-              <div className="hidden lg:block shrink-0">
-                <CheckoutDock pos={pos} labels={labels} canCheckout={canCheckout} />
+              <div className="hidden lg:block shrink-0">       
+                <CheckoutDock pos={pos} labels={labels} canCheckout={canCheckout} onOpenCheckoutModal={handleOpenPointModal} />
               </div>
-            )}
+            )}  
           </div>
         </div>
       </div>
@@ -484,6 +521,7 @@ export function PosTerminal() {
             pos={pos}
             labels={labels}
             canCheckout={canCheckout}
+            onOpenCheckoutModal={handleOpenPointModal}
             className="border-x-0 border-b-0 rounded-none"
           />
         </div>
@@ -736,6 +774,16 @@ export function PosTerminal() {
           </div>
         </div>
       )}
+
+      {/* Modal de cobro con Terminal Point */}
+      {isPointModalOpen && (
+  <CheckoutModal
+    saleId={currentSaleId}
+    amount={pos.total}
+    onSuccess={handlePaymentSuccess}
+    onClose={() => setIsPointModalOpen(false)}
+  />
+)}
 
       {pos.ticketReceipt && (
         <PosTicketModal
