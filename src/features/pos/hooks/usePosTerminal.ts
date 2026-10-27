@@ -354,6 +354,7 @@ export function usePosTerminal() {
       });
       clearCart();
     } catch (error) {
+         console.error('checkout error:', error);
       notify.error(
         error instanceof PosApiError ? error.message : "No se pudo completar la venta.",
       );
