@@ -227,3 +227,4 @@ export async function voidSale(saleId: string): Promise<ApiResponse> {
     throw new Error(getResponseMessage(data, 'No se pudo anular la venta'));
   }
   return data;
+}
