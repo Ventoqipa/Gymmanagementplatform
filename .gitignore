@@ -37,3 +37,7 @@ coverage
 # Optional caches
 .eslintcache
 *.tsbuildinfo
+
+# Access Gateway: lectores detectados en el PC del gym
+tools/access-gateway/terminals.json
+tools/access-gateway/terminals.json.tmp
