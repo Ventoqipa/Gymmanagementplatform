@@ -14,6 +14,7 @@ export type PaymentStatus =
   | 'REFUNDED'
   | 'VOIDED';
 
+
 export interface CreateOrderParams {
   saleId: string;
   amount?: number; // Opcional, ya que el backend lo lee directamente de la venta en base de datos
@@ -226,4 +227,3 @@ export async function voidSale(saleId: string): Promise<ApiResponse> {
     throw new Error(getResponseMessage(data, 'No se pudo anular la venta'));
   }
   return data;
-}

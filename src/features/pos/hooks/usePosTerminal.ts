@@ -48,7 +48,6 @@ export function usePosTerminal() {
 
   // NUEVO: venta con terminal creada desde el carrito actual (ticket guardado hasta aprobar)
   const terminalSaleRef = useRef<{ saleId: string; result: CheckoutResult } | null>(null);
-
   const [newProduct, setNewProduct] = useState<ProductFormState>(() =>
     emptyForm(defaultProductCategory),
   );
@@ -338,6 +337,23 @@ export function usePosTerminal() {
     const payer = config.getSessionPayer?.() ?? undefined;
 
     try {
+      // Si el método de pago seleccionado es CARD, generamos la orden previa y abrimos el modal Point
+      if (paymentMethod === 'CARD') {
+        const result = await service.checkout(
+          cart,
+          paymentMethod,
+          member,
+          config.ivaRegimen,
+          payer ?? undefined,
+        );
+        
+        const saleId = result.sale?.id || 'SALE_' + Date.now();
+        setCurrentSaleId(saleId);
+        setShowPointModal(true);
+        return;
+      }
+
+      // Flujo normal para efectivo u otros métodos
       const result = await service.checkout(
         cart,
         paymentMethod,
@@ -469,8 +485,8 @@ export function usePosTerminal() {
     showPointModal,
     setShowPointModal,
     currentSaleId,
-    checkingOut, // NUEVO
-    completeTerminalSale, // NUEVO
-    abandonTerminalSale, // NUEVO
+    checkingOut, // N
+    completeTerminalSale, // N
+    abandonTerminalSale, 
   };
 }

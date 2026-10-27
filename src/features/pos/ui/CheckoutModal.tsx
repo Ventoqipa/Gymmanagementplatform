@@ -35,14 +35,15 @@ const waitingMessage = (mpStatus?: string | null) =>
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, onSuccess }) => {
     const [phase, setPhase] = useState<PaymentPhase>('loading');
     const [statusMessage, setStatusMessage] = useState('Consultando estado del cobro…');
+
     const [terminals, setTerminals] = useState<PaymentTerminal[]>([]);
     const [terminalId, setTerminalId] = useState('');
-    // NUEVO: la orden ya está en la terminal y no se pudo cancelar por API
+    // N la orden ya está en la terminal y no se pudo cancelar por API
     const [cancelBlocked, setCancelBlocked] = useState(false);
-
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const abortRef = useRef<AbortController | null>(null);
     const startedAtRef = useRef<number>(0);
+
     const inFlightRef = useRef(false);        // NUEVO: evita consultas encimadas
     const failuresRef = useRef(0);            // NUEVO: fallos de red seguidos
     const sendingRef = useRef(false);         // NUEVO: evita doble clic en "Cobrar"
@@ -52,6 +53,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
     const canRetry = phase === 'rejected' || phase === 'canceled' || phase === 'expired';
     const isClosedSale = phase === 'refunded' || phase === 'voided'; // NUEVO: no se puede cobrar
 
+
     // Detiene el polling y aborta la petición en curso
     const stopPolling = () => {
         if (intervalRef.current) {
@@ -60,6 +62,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
         }
         abortRef.current?.abort();
         abortRef.current = null;
+
         inFlightRef.current = false;
     };
 
@@ -71,16 +74,19 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
         const detail = data?.mp_status_detail;
 
         if (!status || ! FINAL_STATUSES.includes(status)) {
+
             setStatusMessage(waitingMessage(data?.mp_status));
             return false;
         }
 
         stopPolling();
+
         setCancelBlocked(false);
         switch (status) {
             case 'APPROVED':
                 setPhase('approved');
                 setStatusMessage(installments > 1 ? `Pago aprobado · ${installments} MSI` : 'Pago aprobado');
+
                 successTimeoutRef.current = setTimeout(() => onSuccess({ installments }), 1500);
                 break;
             case 'REJECTED':
@@ -95,6 +101,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
                 setPhase('refunded');
                 setStatusMessage('Pago reembolsado.');
                 break;
+
             case 'VOIDED': // NUEVO
                 setPhase('voided');
                 setStatusMessage('Venta anulada. Ya no se puede cobrar.');
@@ -107,6 +114,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
     };
 
     // Polling periódico para consultar el estado del pago
+
     // CAMBIO: resetTimer=false al reanudar tras un intento de cancelación fallido
     const startPollingStatus = (resetTimer = true) => {
         stopPolling();
@@ -121,6 +129,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
                 setStatusMessage('Tiempo agotado, reintente.');
                 return;
             }
+
             if (inFlightRef.current) return; // NUEVO: la consulta anterior sigue en curso
             inFlightRef.current = true;
 
@@ -131,6 +140,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
             } catch (error: any) {
                 if (error?.name === 'AbortError') return;
                 console.error('Error consultando estatus del pago:', error);
+
                 // NUEVO: avisar si el servidor no responde
                 failuresRef.current += 1;
                 if (failuresRef.current >= MAX_FAILURES_BEFORE_WARNING) {
@@ -251,6 +261,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
     };
 
     // Aviso si la terminal no está en modo PDV
+
     const selected = terminals.find((t) => t.id === terminalId);
     const notPdv = !!selected?.operating_mode && selected.operating_mode !== 'PDV';
 
@@ -281,6 +292,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
                         onChange={(e) => setTerminalId(e.target.value)}
                         disabled={busy || phase === 'approved' || isClosedSale}
                         className="w-full bg-[#0e0e0e] border border-[rgba(93,63,60,0.2)] text-[#e5e2e1] px-4 py-3 text-[13px] focus:border-[#e31e24] focus:outline-none disabled:opacity-60"
+
                     >
                         {terminals.length === 0 && <option value="">Sin terminales disponibles</option>}
                         {terminals.map((t) => (
@@ -290,12 +302,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
                         ))}
                     </select>
                     {notPdv && (
+
                         <p className="mt-2 text-[11px] text-[#e31e24]">
+
                             La terminal no está en modo PDV ({selected?.operating_mode}); no recibirá cobros.
                         </p>
                     )}
                 </div>
-
                 <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 mb-6 text-center">
                     <p className={`text-[13px] font-medium ${messageColor}`}>{statusMessage}</p>
                     {busy && (
@@ -339,6 +352,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
                                     onClick={handleStartPayment}
                                     disabled={busy || !terminalId}
                                     className="flex-1 bg-[#e31e24] text-white py-3 font-bold text-[10px] tracking-[1px] uppercase hover:bg-[#c41a20] transition-colors disabled:opacity-50"
+
                                 >
                                     {phase === 'sending' ? 'Procesando…' : canRetry ? 'Reintentar cobro' : 'Cobrar'}
                                 </button>

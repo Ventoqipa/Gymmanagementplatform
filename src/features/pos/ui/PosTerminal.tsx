@@ -13,15 +13,18 @@ import {
   User,
   X,
 } from "lucide-react";
+
 import { useCallback, useEffect, useRef, useState } from "react"; // CAMBIO
 import { usePosTerminal } from "../hooks/usePosTerminal";
 import type { LinkedCustomer } from "../domain/types";
 import { PosTicketModal } from "./PosTicketModal";
 import { CheckoutModal } from "./CheckoutModal";
-import { PendingPaymentsPanel } from "./PendingPaymentsPanel"; // NUEVO
+
+import { PendingPaymentsPanel } from "./PendingPaymentsPanel"; // N
 
 // NUEVO: venta que se está cobrando con la terminal (sobrevive a recargar la página)
 const ACTIVE_CHECKOUT_KEY = "pos_active_checkout_sale";
+
 
 const PAYMENT_ICONS = {
   CARD: CreditCard,
@@ -235,6 +238,7 @@ export function PosTerminal() {
   const canCheckout = pos.cart.length > 0 && Boolean(pos.paymentMethod) && !pos.checkingOut;
   const showCheckoutDock = pos.cart.length > 0;
 
+
   //  venta recuperada al recargar, o elegida desde "Cobros pendientes"
   const [resumeSaleId, setResumeSaleId] = useState<string | null>(() =>
     localStorage.getItem(ACTIVE_CHECKOUT_KEY)
@@ -265,6 +269,7 @@ export function PosTerminal() {
     pos.setShowPointModal(false);
     setPendingRefresh((n) => n + 1); // la venta puede quedar pendiente: refrescar panel
   }, [pos]);
+
 
   return (
     <div className={`h-full bg-[#131313] overflow-auto ${showCheckoutDock ? "pb-[11.5rem] lg:pb-8" : ""}`}>
@@ -543,6 +548,7 @@ export function PosTerminal() {
               pos.clearCart();
             }
           }}
+
         />
       )}
 
