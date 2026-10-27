@@ -64,6 +64,7 @@ export function createPosConfig(overrides: PosConfigInput = {}): PosConfig {
       (import.meta.env.VITE_POS_API_PREFIX ??
         (/\/api\/v1\/?$/.test(overrides.apiBaseUrl ?? apiBaseUrl) ? "" : "/api/v1")
       ).replace(/\/$/, ""),
+
     apiKey:
       overrides.apiKey ??
       ((import.meta.env.VITE_POS_API_KEY ?? "").trim() || undefined),
