@@ -63,4 +63,9 @@ export class PosService {
   checkoutSubscription(input: SubscriptionCheckoutInput) {
     return this.repository.checkoutSubscription(input);
   }
+
+  // N: avisa al POS API que la vigencia del socio ya se extendió en el catálogo
+  markSubscriptionApplied(saleId: string): Promise<void> {
+    return this.repository.markSubscriptionApplied(saleId);
+  }
 }

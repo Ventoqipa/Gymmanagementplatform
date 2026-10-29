@@ -5,12 +5,53 @@ import { parseNetworkError, parsePosApiError } from "./parsePosApiError";
 
 export class PosApiError extends Error {
   readonly statusCode: number;
+  /** NUEVO: errorNumber del POS API (p. ej. 24/25 en renovaciones) */
+  readonly errorNumber: number | null;
+  /** NUEVO: data que acompaña al error (p. ej. saleId de un cobro pendiente) */
+  readonly data: unknown;
 
-  constructor(message: string, statusCode: number) {
+  constructor(
+    message: string,
+    statusCode: number,
+    errorNumber: number | null = null,
+    data: unknown = null,
+  ) {
     super(message);
     this.name = "PosApiError";
     this.statusCode = statusCode;
+    this.errorNumber = errorNumber;
+    this.data = data;
   }
+}
+
+/** NUEVO: saca errorNumber y data de la respuesta de error, si vienen */
+function extractErrorDetails(payload: unknown): {
+  errorNumber: number | null;
+  data: unknown;
+} {
+  if (!payload || typeof payload !== "object") {
+    return { errorNumber: null, data: null };
+  }
+  const p = payload as Record<string, unknown>;
+  const raw = p.errorNumber;
+  const errorNumber =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && raw.trim() !== "" && !Number.isNaN(Number(raw))
+        ? Number(raw)
+        : null;
+  return { errorNumber, data: p.data ?? null };
+}
+
+/** NUEVO: crea el error con todos los datos de la respuesta */
+function buildApiError(statusCode: number, payload: unknown): PosApiError {
+  const { errorNumber, data } = extractErrorDetails(payload);
+  return new PosApiError(
+    parsePosApiError(statusCode, payload),
+    statusCode,
+    errorNumber,
+    data,
+  );
 }
 
 function buildHeaders(config: PosConfig): HeadersInit {
@@ -44,10 +85,7 @@ function unwrapData<T>(payload: unknown): T {
   if (payload && typeof payload === "object" && "isResponseSuccessful" in payload) {
     const envelope = payload as TanosiPosEnvelope<T>;
     if (!envelope.isResponseSuccessful || envelope.statusCode >= 400) {
-      throw new PosApiError(
-        parsePosApiError(envelope.statusCode, envelope),
-        envelope.statusCode,
-      );
+      throw buildApiError(envelope.statusCode, envelope); // CAMBIO
     }
     return envelope.data;
   }
@@ -84,7 +122,7 @@ export async function posGet<T>(
 
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
-    throw new PosApiError(parsePosApiError(response.status, payload), response.status);
+    throw buildApiError(response.status, payload); // CAMBIO
   }
   return unwrapData<T>(payload);
 }
@@ -107,7 +145,7 @@ export async function posPost<T>(
 
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
-    throw new PosApiError(parsePosApiError(response.status, payload), response.status);
+    throw buildApiError(response.status, payload); // CAMBIO
   }
   return unwrapData<T>(payload);
 }
@@ -131,7 +169,7 @@ export async function posPut<T>(
 
   const payload = await parseJsonSafe(response);
   if (!response.ok) {
-    throw new PosApiError(parsePosApiError(response.status, payload), response.status);
+    throw buildApiError(response.status, payload); // CAMBIO
   }
   return unwrapData<T>(payload);
 }
@@ -150,6 +188,6 @@ export async function posDelete(config: PosConfig, path: string): Promise<void> 
 
   if (!response.ok) {
     const payload = await parseJsonSafe(response);
-    throw new PosApiError(parsePosApiError(response.status, payload), response.status);
+    throw buildApiError(response.status, payload); // CAMBIO
   }
 }

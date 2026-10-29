@@ -13,9 +13,16 @@ import type {
 import type { MemoryPosRepository } from "./memoryPosRepository";
 import type { RestPosRepository } from "./restPosRepository";
 
+// NUEVO: cobros con terminal Mercado Pago; necesitan el POS API (no hay respaldo local)
+const TERMINAL_METHODS = ["CARD", "TERMINAL_MP"];
+
+const isTerminalMethod = (method?: string | null): boolean =>
+  TERMINAL_METHODS.includes(String(method ?? "").toUpperCase());
+
 /**
  * Intenta REST (Neubox); en error de red o 5xx usa memoria local
  * para no bloquear operación en tienda.
+ * Excepción: los cobros con tarjeta nunca usan memoria local.
  */
 export class HybridPosRepository implements PosRepository {
   constructor(
@@ -28,6 +35,15 @@ export class HybridPosRepository implements PosRepository {
       return error.statusCode === 0 || error.statusCode >= 500;
     }
     return true;
+  }
+
+  /** NUEVO: error claro cuando un cobro con tarjeta no llega al servidor */
+  private terminalUnavailable(error: unknown): PosApiError {
+    const statusCode = error instanceof PosApiError ? error.statusCode : 0;
+    return new PosApiError(
+      "Sin conexión con el servidor: el cobro con tarjeta necesita conexión. Reintenta o cobra en efectivo.",
+      statusCode,
+    );
   }
 
   async listProducts(params?: {
@@ -81,6 +97,8 @@ export class HybridPosRepository implements PosRepository {
       return await this.remote.checkout(input);
     } catch (error) {
       if (!this.shouldFallback(error)) throw error;
+      // NUEVO: una venta con tarjeta no puede quedar solo en memoria
+      if (isTerminalMethod(input.paymentMethod)) throw this.terminalUnavailable(error);
       return this.local.checkout(input);
     }
   }
@@ -91,15 +109,20 @@ export class HybridPosRepository implements PosRepository {
     try {
       return await this.remote.checkoutSubscription(input);
     } catch (error) {
-      if (
-        error instanceof PosApiError &&
-        (error.statusCode === 404 || error.statusCode === 0 || error.statusCode >= 500)
-      ) {
-        return this.local.checkoutSubscription(input);
-      }
-      if (!this.shouldFallback(error)) throw error;
+      const canFallback =
+        (error instanceof PosApiError &&
+          (error.statusCode === 404 || error.statusCode === 0 || error.statusCode >= 500)) ||
+        this.shouldFallback(error);
+      if (!canFallback) throw error;
+      // NUEVO: una renovación con tarjeta sin servidor daría vigencia sin cobrar
+      if (isTerminalMethod(input.paymentMethod)) throw this.terminalUnavailable(error);
       return this.local.checkoutSubscription(input);
     }
+  }
+
+  // NUEVO: solo remoto; si falla, Members.tsx lo reintenta
+  async markSubscriptionApplied(saleId: string): Promise<void> {
+    await this.remote.markSubscriptionApplied(saleId);
   }
 
   async listSales(params?: {

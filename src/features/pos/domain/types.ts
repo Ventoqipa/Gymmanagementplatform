@@ -72,6 +72,8 @@ export type PosSale = {
   subscriptionConcept?: SubscriptionConcept;
   periodKey?: string;
   lines?: PosSaleLine[];
+  /** N: estado del cobro (con tarjeta nace PENDING) */
+  paymentStatus?: "PENDING" | "APPROVED" | "REJECTED" | "CANCELED" | "EXPIRED" | "REFUNDED" | "VOIDED";
 };
 
 export type PosReportBucket = {
