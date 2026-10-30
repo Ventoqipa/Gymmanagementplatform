@@ -5,7 +5,10 @@ import type { PosSale } from "@/features/pos";
 import {
   filterSalesByPayer,
   filterSalesByType,
+  isPaidSale, // N
+  salePaymentStatus, // N
   summarizePosSales,
+  summarizePosSalesBreakdown, // N
   summarizeSalesByPayer,
 } from "@/features/pos";
 import { getGymPosService } from "../config/gymPosService";
@@ -65,6 +68,28 @@ function SalePayerLine({ sale }: { sale: PosSale }) {
         <span className="font-mono text-[#707070] ml-1">({sale.payerId})</span>
       ) : null}
     </p>
+  );
+}
+
+// N: etiqueta del estado de pago de cada venta
+const STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  APPROVED: { label: "Pagada", className: "text-[#69f0ae] border-[#00c853]/40 bg-[#00c853]/10" },
+  PENDING: { label: "Pendiente", className: "text-[#ffcc80] border-[#ffa726]/40 bg-[#ffa726]/10" },
+  REJECTED: { label: "Rechazada", className: "text-[#ff6b6b] border-[#e31e24]/40 bg-[#e31e24]/10" },
+  CANCELED: { label: "Cancelada", className: "text-[#a0a0a0] border-[#5a5a5a]/50 bg-[#2a2a2a]" },
+  EXPIRED: { label: "Expirada", className: "text-[#a0a0a0] border-[#5a5a5a]/50 bg-[#2a2a2a]" },
+  VOIDED: { label: "Anulada", className: "text-[#a0a0a0] border-[#5a5a5a]/50 bg-[#2a2a2a]" },
+  REFUNDED: { label: "Reembolsada", className: "text-[#b8d4ff] border-[#5c8dff]/40 bg-[#5c8dff]/10" },
+};
+
+function SaleStatusBadge({ sale }: { sale: PosSale }) {
+  const badge = STATUS_BADGE[salePaymentStatus(sale)] ?? STATUS_BADGE.APPROVED;
+  return (
+    <span
+      className={`inline-flex items-center px-1.5 py-0.5 border text-[8px] font-bold uppercase tracking-wide leading-none ${badge.className}`}
+    >
+      {badge.label}
+    </span>
   );
 }
 
@@ -149,8 +174,9 @@ export default function Reports() {
     [subscriptionSales],
   );
 
+  // CAMBIO: el ranking solo cuenta ventas pagadas
   const topProducts = useMemo(
-    () => computeTopProducts(5, range.from, range.to, productSales),
+    () => computeTopProducts(5, range.from, range.to, productSales.filter(isPaidSale)),
     [range.from, range.to, productSales],
   );
 
@@ -166,6 +192,12 @@ export default function Reports() {
       : tab === "subscriptions"
         ? subscriptionSales
         : [];
+
+  // N: lo no cobrado, devoluciones y por método de la pestaña activa
+  const activeBreakdown = useMemo(
+    () => summarizePosSalesBreakdown(activeList),
+    [activeList],
+  );      
 
   const filteredCashierSummaries = useMemo(() => {
     if (payerFilter === "ALL") return cashierSummaries;
@@ -387,13 +419,14 @@ export default function Reports() {
               </p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-[12px]">
+                <table className="w-full min-w-[720px] text-[12px]">
                   <thead>
                     <tr className="text-[#808080] text-[10px] uppercase tracking-wide border-b border-[rgba(93,63,60,0.15)]">
                       <th className="text-left py-2 pr-3 font-bold">Cajero</th>
                       <th className="text-right py-2 px-2 font-bold">Productos</th>
                       <th className="text-right py-2 px-2 font-bold">Suscripciones</th>
                       <th className="text-right py-2 px-2 font-bold">Transacciones</th>
+                      <th className="text-right py-2 px-2 font-bold">Sin cobrar</th>
                       <th className="text-right py-2 pl-2 font-bold">Total</th>
                     </tr>
                   </thead>
@@ -426,6 +459,19 @@ export default function Reports() {
                         <td className="py-3 px-2 text-right align-top tabular-nums">
                           {row.totalCount}
                         </td>
+                        {/* N */}
+                        <td className="py-3 px-2 text-right align-top tabular-nums">
+                          {row.unpaidCount > 0 ? (
+                            <>
+                              <p className="text-[#ffcc80]">{row.unpaidCount}</p>
+                              <p className="text-[#909090] text-[10px]">
+                                ${formatMoney(row.unpaidTotal)}
+                              </p>
+                            </>
+                          ) : (
+                            <span className="text-[#5a5a5a]">—</span>
+                          )}
+                        </td>
                         <td className="py-3 pl-2 text-right align-top font-bold text-[#e31e24] tabular-nums">
                           ${formatMoney(row.totalAmount)}
                         </td>
@@ -452,6 +498,29 @@ export default function Reports() {
             </p>
           </div>
 
+            {/* N: desglose por método (solo pagado) */}
+            {activeBucket.count > 0 && (
+              <p className="text-[#a8a4a3] text-[10px] mt-2 tabular-nums">
+                Efectivo ${formatMoney(activeBreakdown.byMethod.CASH.total)} · Tarjeta $
+                {formatMoney(activeBreakdown.byMethod.CARD.total)} · QR $
+                {formatMoney(activeBreakdown.byMethod.QR.total)}
+              </p>
+            )}
+            {/* N: lo que no se cobró no suma */}
+            {activeBreakdown.unpaid.count > 0 && (
+              <p className="text-[#ffcc80] text-[10px] mt-1 tabular-nums">
+                {activeBreakdown.unpaid.count} sin cobrar ($
+                {formatMoney(activeBreakdown.unpaid.total)}) · no se suman al ingreso
+              </p>
+            )}
+            {activeBreakdown.refunded.count > 0 && (
+              <p className="text-[#b8d4ff] text-[10px] mt-1 tabular-nums">
+                {activeBreakdown.refunded.count} reembolsada
+                {activeBreakdown.refunded.count === 1 ? "" : "s"} ($
+                {formatMoney(activeBreakdown.refunded.total)})
+              </p>
+            )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.1)] p-4 md:p-5">
               <div className="flex items-center justify-between gap-3 mb-3">
@@ -467,38 +536,55 @@ export default function Reports() {
                 {activeList.length === 0 ? (
                   <p className="text-[#808080] text-[13px]">Sin movimientos en este periodo.</p>
                 ) : (
-                  activeList.map((s) => (
-                    <div key={s.id} className="border-b border-[rgba(93,63,60,0.06)] pb-3 text-[12px]">
-                      <div className="flex justify-between gap-2">
-                        <span className="text-[#e5e2e1] font-bold">${s.total.toFixed(2)}</span>
-                        <span className="text-[#808080] text-[10px]">
-                          {PAYMENT_METHOD[s.method] ?? s.method}
-                        </span>
+                    activeList.map((s) => {
+                    const paid = isPaidSale(s); // N
+                    return (
+                      <div
+                        key={s.id}
+                        className={`border-b border-[rgba(93,63,60,0.06)] pb-3 text-[12px] ${
+                          paid ? "" : "opacity-60"
+                        }`}
+                      >
+                        <div className="flex justify-between items-center gap-2">
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span
+                              className={`font-bold ${
+                                paid ? "text-[#e5e2e1]" : "text-[#808080] line-through"
+                              }`}
+                            >
+                              ${s.total.toFixed(2)}
+                            </span>
+                            <SaleStatusBadge sale={s} />
+                          </span>
+                          <span className="text-[#808080] text-[10px]">
+                            {PAYMENT_METHOD[s.method] ?? s.method}
+                          </span>
+                        </div>
+                        <p className="text-[#d8d4d3] text-[12px] mt-1 leading-snug">
+                          {s.linesSummary}
+                        </p>
+                        {tab === "subscriptions" && s.subscriptionConcept && (
+                          <p className="text-[#b8b4b3] text-[11px] mt-1">
+                            {MEMBERSHIP_CONCEPT[s.subscriptionConcept] ?? s.subscriptionConcept}
+                            {s.periodKey ? ` · ${s.periodKey}` : ""}
+                          </p>
+                        )}
+                        {s.memberName && (
+                          <p className="text-[#a8a4a3] text-[10px] mt-1 font-mono">
+                            Cliente: {s.memberName} ({s.memberId})
+                          </p>
+                        )}
+                        <SalePayerLine sale={s} />
+                        <p className="text-[#393939] text-[9px] font-mono mt-1">
+                          {s.id} ·{" "}
+                          {new Date(s.dateIso).toLocaleString("es-MX", {
+                            dateStyle: "short",
+                            timeStyle: "short",
+                          })}
+                        </p>
                       </div>
-                      <p className="text-[#d8d4d3] text-[12px] mt-1 leading-snug">
-                        {s.linesSummary}
-                      </p>
-                      {tab === "subscriptions" && s.subscriptionConcept && (
-                        <p className="text-[#b8b4b3] text-[11px] mt-1">
-                          {MEMBERSHIP_CONCEPT[s.subscriptionConcept] ?? s.subscriptionConcept}
-                          {s.periodKey ? ` · ${s.periodKey}` : ""}
-                        </p>
-                      )}
-                      {s.memberName && (
-                        <p className="text-[#a8a4a3] text-[10px] mt-1 font-mono">
-                          Cliente: {s.memberName} ({s.memberId})
-                        </p>
-                      )}
-                      <SalePayerLine sale={s} />
-                      <p className="text-[#393939] text-[9px] font-mono mt-1">
-                        {s.id} ·{" "}
-                        {new Date(s.dateIso).toLocaleString("es-MX", {
-                          dateStyle: "short",
-                          timeStyle: "short",
-                        })}
-                      </p>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
