@@ -40,8 +40,11 @@ import { addMembershipPayment } from "../lib/demoStore";
 import { getGymPosService } from "../config/gymPosService";
 import {
   PosTicketModal,
+  CheckoutModal, // NUEVO
+  PosApiError, // NUEVO
   DEFAULT_LABELS,
   buildSubscriptionReceipt,
+  type PosSale, // NUEVO
   type PosTicketReceipt,
   type SubscriptionConcept,
 } from "@/features/pos";
@@ -685,6 +688,19 @@ const emptyNewMemberForm = () => {
   };
 };
 
+/** NUEVO: renovación lista para aplicar a la vigencia (después de cobrar) */
+type RenewalPlan = {
+  member: Member;
+  /** Venta del POS; null en domiciliado o si se guardó solo en local */
+  saleId: string | null;
+  amount: number;
+  isDirectDebit: boolean;
+  newRenewalDate: string;
+  priceBranchFrequencyID: number;
+  debitMonths: number;
+  receipt?: PosTicketReceipt | null;
+};
+
 export default function Members() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
@@ -828,8 +844,13 @@ export default function Members() {
     newRenewalDate: "",
   });
   const [submittingRenewal, setSubmittingRenewal] = useState(false);
-  /** Cobro POS de la renovación ya registrado (reintento solo actualiza vigencia). */
-  const [renewalPaymentDone, setRenewalPaymentDone] = useState(false);
+  /** CAMBIO: renovación ya cobrada a la que le falta actualizar la vigencia (reintento sin cobrar). */
+  const [approvedRenewal, setApprovedRenewal] = useState<RenewalPlan | null>(null);
+  const renewalPaymentDone = approvedRenewal !== null;
+  /** NUEVO: renovación con tarjeta esperando el pago en la terminal */
+  const [renewalCheckout, setRenewalCheckout] = useState< 
+    (RenewalPlan & { saleId: string }) | null
+  >(null);
   const [memberEditForm, setMemberEditForm] = useState<ReturnType<typeof memberToEditForm> | null>(null);
   const [savingMemberEdit, setSavingMemberEdit] = useState(false);
   const memberEditFileRef = useRef<HTMLInputElement>(null);
@@ -1118,7 +1139,7 @@ export default function Members() {
       directDebit,
     );
     setPaymentModalMember(member);
-    setRenewalPaymentDone(false);
+    setApprovedRenewal(null);
     setPaymentForm({
       amount: cost,
       method: "CARD",
@@ -1244,7 +1265,7 @@ export default function Members() {
     periodKey?: string | null;
     /** Si es false, no guarda respaldo local: relanza el error para poder reintentar. */
     localFallback?: boolean;
-  }): Promise<{ receipt: PosTicketReceipt; synced: boolean }> => {
+  }): Promise<{ receipt: PosTicketReceipt; synced: boolean; sale: PosSale | null }> => {
     const payer = getSessionPayer();
     const checkoutInput = {
       memberId: opts.memberId,
@@ -1257,9 +1278,10 @@ export default function Members() {
       payerName: payer?.name,
     };
     try {
-      const { receipt } =
+      // CAMBIO: también se devuelve la venta (paymentStatus PENDING con tarjeta)
+      const { receipt, sale } =
         await getGymPosService().checkoutSubscription(checkoutInput);
-      return { receipt, synced: true };
+      return { receipt, synced: true, sale };
     } catch (error) {
       if (opts.localFallback === false) throw error;
       addMembershipPayment({
@@ -1274,6 +1296,7 @@ export default function Members() {
           `TKT-${Date.now().toString(36).toUpperCase()}`,
         ),
         synced: false,
+        sale: null,
       };
     }
   };
@@ -1288,67 +1311,30 @@ export default function Members() {
     });
   };
 
-  /**
-   * Renovación en dos etapas reintenables (mismo comportamiento que el alta):
-   * 1) cobro POS (sin respaldo local; si falla, se reintenta solo el cobro),
-   * 2) actualización de vigencia/precios en catálogo (si falla, el reintento
-   *    salta el cobro y solo repite la actualización).
-   */
-  const submitRenewal = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!paymentModalMember || submittingRenewal) return;
-
-    const amount = parseFloat(paymentForm.amount);
-    if (Number.isNaN(amount) || amount <= 0) {
-      toast.error("Ingresa un monto válido para la renovación.");
-      return;
-    }
-    if (!paymentForm.newRenewalDate) {
-      toast.error("Selecciona un periodo de vigencia.");
-      return;
-    }
-
-    const member = paymentModalMember;
-    const newRenewalDate = paymentForm.newRenewalDate;
-    const isDirectDebit = paymentForm.directDebit;
-    const debitOpt = isDirectDebit
-      ? (findPeriodOption(directDebitOptions, paymentForm.periodKey) ??
-        directDebitOptions[0])
-      : undefined;
-    const debitMonths =
-      debitOpt?.months ?? (paymentForm.periodKey === "12m" ? 12 : 6);
-    setSubmittingRenewal(true);
-
-    try {
-      // Etapa 1: cobro POS. En domiciliado no se cobra hoy: las mensualidades
-      // se domicilian a tarjeta, por lo que se salta directo a la actualización.
-      if (!renewalPaymentDone && !isDirectDebit) {
-        try {
-          const { receipt } = await registerSubscriptionPayment({
-            memberId: member.id,
-            memberName: memberFullName(member),
-            amount,
-            concept: "RENEWAL",
-            method: paymentForm.method,
-            periodKey: paymentForm.periodKey,
-            localFallback: false,
-          });
-          setSubscriptionTicketReceipt(receipt);
-          setRenewalPaymentDone(true);
-        } catch (error) {
-          toast.error("No se pudo registrar el cobro", {
-            description: `${
-              error instanceof Error
-                ? error.message
-                : "Error inesperado en el POS."
-            } No se actualizó la vigencia; reintenta el cobro.`,
-            duration: 12_000,
-          });
-          return;
-        }
+  /** NUEVO: avisa al POS que la vigencia ya se aplicó (con reintentos) */
+  const markRenewalApplied = async (saleId: string): Promise<void> => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await getGymPosService().markSubscriptionApplied(saleId);
+        return;
+      } catch {
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
       }
+    }
+    toast.warning("Vigencia actualizada, pero el POS no lo registró", {
+      description: `Venta ${saleId}. Si al renovar otra vez aparece "pagada sin aplicar", revisa la vigencia antes de aceptar.`,
+      duration: 15_000,
+    });
+  };
 
-      // Etapa 2: actualizar vigencia y precios en catálogo.
+  /**
+   * NUEVO: etapa 2, actualizar vigencia y precios en catálogo.
+   * Solo se llama con el pago ya aprobado (o en domiciliado, sin cobro hoy).
+   */
+  const applyRenewal = async (plan: RenewalPlan): Promise<boolean> => {
+    const { member, newRenewalDate, isDirectDebit, amount, debitMonths } = plan;
+    setSubmittingRenewal(true);
+    try {
       const clientId = clientIdFromMemberId(member.id);
       if (clientId) {
         const digits = normalizePhoneDigits(member.phone ?? "");
@@ -1369,13 +1355,14 @@ export default function Members() {
           enrollmentDate: member.enrollmentDate,
           renewalDate: newRenewalDate,
           idDocumentDataUrl: member.idDocumentDataUrl,
-          // Actualiza modalidad y precio según lo elegido en la renovación.
           isDirectDebit,
           priceRegular: isDirectDebit ? 0 : amount,
           priceDirectDebit: isDirectDebit ? amount : 0,
-          priceBranchFrequencyID: paymentForm.priceBranchFrequencyID,
+          priceBranchFrequencyID: plan.priceBranchFrequencyID,
         });
         if (!updateResult.ok) {
+          // El cobro ya se hizo: el reintento solo repite la actualización
+          if (!isDirectDebit) setApprovedRenewal(plan);
           toast.warning(
             isDirectDebit
               ? "No se pudo actualizar la domiciliación"
@@ -1385,7 +1372,7 @@ export default function Members() {
               duration: 12_000,
             },
           );
-          return;
+          return false;
         }
         setMembers((prev) => {
           const next = prev.map((m) =>
@@ -1400,21 +1387,176 @@ export default function Members() {
         applyRenewalDateLocally(member.id, newRenewalDate);
       }
 
+      if (plan.saleId) await markRenewalApplied(plan.saleId);
+
+      setApprovedRenewal(null);
       setPaymentModalMember(null);
-      setRenewalPaymentDone(false);
       toast.success("Membresía renovada", {
         description: isDirectDebit
           ? `Domiciliado: ${debitMonths} cargos de $${amount.toFixed(2)} a tarjeta (total $${formatMxnAmount(amount * debitMonths)}).`
           : `Pago $${amount.toFixed(2)} registrado en POS.`,
       });
+      return true;
     } catch (error) {
-      toast.error("No se pudo registrar la renovación", {
-        description:
-          error instanceof Error ? error.message : "Error inesperado al cobrar.",
+      if (!isDirectDebit) setApprovedRenewal(plan);
+      toast.error("No se pudo actualizar la vigencia", {
+        description: `${
+          error instanceof Error ? error.message : "Error inesperado."
+        } Reintenta: no se cobrará de nuevo.`,
       });
+      return false;
     } finally {
       setSubmittingRenewal(false);
     }
+  };
+
+  /** NUEVO: el socio ya tiene una renovación abierta en el POS (409) */
+  const resumeOpenRenewal = async (
+    member: Member,
+    errorNumber: 24 | 25,
+    saleId: string,
+    info: { amount?: number; periodKey?: string | null },
+  ) => {
+    // Se usa el plan y monto de la venta original, no lo elegido ahora
+    const opt =
+      findPeriodOption(directPayOptions, (info.periodKey ?? null) as SubscriptionPeriodKey | null) ??
+      findPeriodOption(directPayOptions, paymentForm.periodKey);
+    if (!opt) {
+      toast.error("No se reconoce el plan de la renovación pendiente.");
+      return;
+    }
+    const amount = Number(info.amount ?? 0);
+    const { newRenewalDate } = extendMembershipPeriod(renewalBaseDate(member), opt);
+    const plan: RenewalPlan = {
+      member,
+      saleId,
+      amount,
+      isDirectDebit: false,
+      newRenewalDate,
+      priceBranchFrequencyID: opt.priceBranchFrequencyID,
+      debitMonths: 0,
+    };
+
+    if (errorNumber === 25) {
+      toast.info("Este socio tiene un cobro pendiente", {
+        description: `Se retoma la venta ${saleId} · ${opt.label} · $${formatMxnAmount(amount)}.`,
+      });
+      setRenewalCheckout({ ...plan, saleId });
+      return;
+    }
+
+    const ok = window.confirm(
+      `${memberFullName(member)} ya pagó una renovación (${opt.label}, $${formatMxnAmount(amount)}) que no se aplicó a su vigencia.\n\n` +
+        `Vigencia actual: ${formatRenewalDate(member.renewalDate)}\n` +
+        `Nueva vigencia: ${formatRenewalDate(newRenewalDate)}\n\n` +
+        `¿Aplicarla ahora sin volver a cobrar?`,
+    );
+    if (ok) await applyRenewal(plan);
+  };
+
+  /**
+   * CAMBIO: renovación en dos etapas.
+   * 1) Cobro POS. Con tarjeta se abre la terminal y la vigencia se aplica
+   *    solo cuando Mercado Pago aprueba.
+   * 2) Actualización de vigencia en catálogo (applyRenewal).
+   */
+  const submitRenewal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentModalMember || submittingRenewal) return;
+
+    // Ya se cobró: solo reintentar la actualización
+    if (approvedRenewal) {
+      await applyRenewal(approvedRenewal);
+      return;
+    }
+
+    const amount = parseFloat(paymentForm.amount);
+    if (Number.isNaN(amount) || amount <= 0) {
+      toast.error("Ingresa un monto válido para la renovación.");
+      return;
+    }
+    if (!paymentForm.newRenewalDate) {
+      toast.error("Selecciona un periodo de vigencia.");
+      return;
+    }
+
+    const member = paymentModalMember;
+    const isDirectDebit = paymentForm.directDebit;
+    const debitOpt = isDirectDebit
+      ? (findPeriodOption(directDebitOptions, paymentForm.periodKey) ??
+        directDebitOptions[0])
+      : undefined;
+    const debitMonths =
+      debitOpt?.months ?? (paymentForm.periodKey === "12m" ? 12 : 6);
+
+    const plan: RenewalPlan = {
+      member,
+      saleId: null,
+      amount,
+      isDirectDebit,
+      newRenewalDate: paymentForm.newRenewalDate,
+      priceBranchFrequencyID: paymentForm.priceBranchFrequencyID,
+      debitMonths,
+    };
+
+    // Domiciliado: hoy no se cobra en el POS
+    if (isDirectDebit) {
+      await applyRenewal(plan);
+      return;
+    }
+
+    setSubmittingRenewal(true);
+    let result: Awaited<ReturnType<typeof registerSubscriptionPayment>>;
+    try {
+      result = await registerSubscriptionPayment({
+        memberId: member.id,
+        memberName: memberFullName(member),
+        amount,
+        concept: "RENEWAL",
+        method: paymentForm.method,
+        periodKey: paymentForm.periodKey,
+        localFallback: false,
+      });
+    } catch (error) {
+      setSubmittingRenewal(false);
+      // NUEVO: renovación abierta (25 = cobro pendiente, 24 = pagada sin aplicar)
+      if (
+        error instanceof PosApiError &&
+        error.statusCode === 409 &&
+        (error.errorNumber === 24 || error.errorNumber === 25)
+      ) {
+        const info = (error.data ?? {}) as {
+          saleId?: string;
+          amount?: number;
+          periodKey?: string | null;
+        };
+        if (info.saleId) {
+          await resumeOpenRenewal(member, error.errorNumber, info.saleId, info);
+          return;
+        }
+      }
+      toast.error("No se pudo registrar el cobro", {
+        description: `${
+          error instanceof Error ? error.message : "Error inesperado en el POS."
+        } No se actualizó la vigencia; reintenta el cobro.`,
+        duration: 12_000,
+      });
+      return;
+    }
+    setSubmittingRenewal(false);
+
+    // Venta del servidor (las locales no traen paymentStatus)
+    const serverSale = result.sale?.paymentStatus ? result.sale : null;
+
+    // NUEVO: tarjeta → cobrar en la terminal; la vigencia se aplica al aprobar
+    if (serverSale?.paymentStatus === "PENDING") {
+      setRenewalCheckout({ ...plan, saleId: serverSale.id, receipt: result.receipt });
+      return;
+    }
+
+    // Efectivo / QR: ya pagado
+    setSubscriptionTicketReceipt(result.receipt);
+    await applyRenewal({ ...plan, saleId: serverSale?.id ?? null });
   };
 
   const clearStep1Error = (field: AddMemberStep1Field) => {
@@ -4377,6 +4519,29 @@ export default function Members() {
           </div>
         </div>
       )}
+      
+            {/* N: cobro de la renovación en la terminal Mercado Pago */}
+      {renewalCheckout && (
+        <CheckoutModal
+          key={renewalCheckout.saleId}
+          saleId={renewalCheckout.saleId}
+          onClose={() => {
+            setRenewalCheckout(null);
+            toast.info("Cobro sin completar", {
+              description:
+                "La vigencia no cambió. Al volver a renovar a este socio se retoma el mismo cobro, o anúlalo en Cobros pendientes del POS.",
+              duration: 10_000,
+            });
+          }}
+          onSuccess={() => {
+            const plan = renewalCheckout;
+            setRenewalCheckout(null);
+            if (plan.receipt) setSubscriptionTicketReceipt(plan.receipt);
+            void applyRenewal(plan);
+          }}
+        />
+      )}
+
       {subscriptionTicketReceipt && (
         <PosTicketModal
           receipt={subscriptionTicketReceipt}

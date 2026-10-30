@@ -32,4 +32,6 @@ export interface PosRepository {
     type?: PosTransactionType;
   }): Promise<PosSale[]>;
   listSalesToday(): Promise<PosSale[]>;
+  /** N: marca la renovación como aplicada a la vigencia del socio */
+  markSubscriptionApplied(saleId: string): Promise<void>;
 }

@@ -4,6 +4,7 @@ export { PosProvider, usePosContext } from "./ui/PosProvider";
 export type { PosProviderProps } from "./ui/PosProvider";
 export { PosTerminal } from "./ui/PosTerminal";
 export { PosTicketModal } from "./ui/PosTicketModal";
+export { CheckoutModal } from "./ui/CheckoutModal"; // N
 export { usePosTerminal } from "./hooks/usePosTerminal";
 
 export { createPosConfig, eliteGymPosConfig } from "./config/createPosConfig";

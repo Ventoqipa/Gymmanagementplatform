@@ -28,6 +28,18 @@ type CheckoutApiResponse = {
   products?: PosProduct[];
 };
 
+/**
+ * N: normaliza la venta sin perder el estado de pago.
+ * Si la API no lo manda (ventas viejas), se considera pagada.
+ */
+function normalizeWithPaymentStatus(raw: PosSale): PosSale {
+  const status = (raw as { paymentStatus?: PosSale["paymentStatus"] })?.paymentStatus;
+  return {
+    ...normalizePosSale(raw),
+    paymentStatus: status ?? "APPROVED",
+  };
+}
+
 export class RestPosRepository implements PosRepository {
   constructor(private readonly config: PosConfig) {}
 
@@ -91,7 +103,7 @@ export class RestPosRepository implements PosRepository {
         payerName: input.payer?.name,
       },
     );
-    
+
     const pending: any = (result as any).data ?? result;
     if (!result.sale && pending?.saleId !== undefined) {
       return {
@@ -104,7 +116,7 @@ export class RestPosRepository implements PosRepository {
     const products = result.products ?? (await this.listProducts());
 
     return {
-      sale: normalizePosSale(result.sale),
+      sale: normalizeWithPaymentStatus(result.sale), // CAMBIO
       receipt: result.receipt,
       products,
     };
@@ -130,7 +142,8 @@ export class RestPosRepository implements PosRepository {
         payerName: input.payerName,
       },
     );
-    const sale = normalizePosSale(result.sale);
+    // CAMBIO: conserva paymentStatus (PENDING con tarjeta → abrir terminal)
+    const sale = normalizeWithPaymentStatus(result.sale);
     const receipt =
       result.receipt ??
       buildSubscriptionReceipt(
@@ -139,6 +152,15 @@ export class RestPosRepository implements PosRepository {
         sale.dateIso,
       );
     return { sale, receipt };
+  }
+
+  // NUEVO: avisa al POS API que la vigencia ya se extendió en el catálogo
+  async markSubscriptionApplied(saleId: string): Promise<void> {
+    await posPost<unknown>(
+      this.config,
+      POS_API_PATHS.saleSubscriptionApplied(saleId),
+      {},
+    );
   }
 
   async listSales(params?: {
@@ -151,7 +173,8 @@ export class RestPosRepository implements PosRepository {
     if (params?.to) query.to = localDayEndUtcIso(params.to);
     if (params?.type) query.type = params.type;
     const rows = await posGet<PosSale[]>(this.config, POS_API_PATHS.sales, query);
-    return rows.map(normalizePosSale).filter((sale) => {
+    // CAMBIO: los reportes necesitarán saber qué ventas sí están pagadas
+    return rows.map(normalizeWithPaymentStatus).filter((sale) => {
       if (!params?.type) return true;
       return resolveTransactionType(sale) === params.type;
     });
@@ -159,7 +182,7 @@ export class RestPosRepository implements PosRepository {
 
   async listSalesToday(): Promise<PosSale[]> {
     const rows = await posGet<PosSale[]>(this.config, POS_API_PATHS.salesToday);
-    return rows.map(normalizePosSale);
+    return rows.map(normalizeWithPaymentStatus); // CAMBIO
   }
 
   healthCheck(): Promise<void> {

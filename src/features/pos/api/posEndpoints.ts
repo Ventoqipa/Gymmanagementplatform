@@ -11,4 +11,6 @@ export const POS_API_PATHS = {
   salesSubscription: "/sales/subscription",
   sales: "/sales",
   salesToday: "/sales/today",
+  saleSubscriptionApplied: (id: string) =>
+    `/sales/${encodeURIComponent(id)}/subscription-applied`,
 } as const;
