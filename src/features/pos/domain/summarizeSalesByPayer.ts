@@ -1,4 +1,5 @@
 import { resolveTransactionType } from "./filterSales";
+import { isPaidSale, isUnpaidSale } from "./summarizeSales"; // NUEVO
 import type { PosSale } from "./types";
 
 export type PayerSalesSummary = {
@@ -11,6 +12,9 @@ export type PayerSalesSummary = {
   subscriptionTotal: number;
   totalCount: number;
   totalAmount: number;
+  /** N: ventas del cajero sin cobrar (PENDING, REJECTED, CANCELED, EXPIRED) */
+  unpaidCount: number;
+  unpaidTotal: number;
 };
 
 const SIN_CAJERO_KEY = "__sin_cajero__";
@@ -40,11 +44,20 @@ export function filterSalesByPayer(
   return sales.filter((sale) => payerKeyFromSale(sale) === payerKey);
 }
 
-/** Agrupa ventas del periodo por cajero (payer). */
+/**
+ * Agrupa ventas del periodo por cajero (payer).
+ * CAMBIO: los totales solo cuentan ventas pagadas (APPROVED);
+ * lo no cobrado va aparte en unpaidCount / unpaidTotal.
+ * Anuladas (VOIDED) y reembolsadas (REFUNDED) no suman.
+ */
 export function summarizeSalesByPayer(sales: PosSale[]): PayerSalesSummary[] {
   const map = new Map<string, PayerSalesSummary>();
 
   for (const sale of sales) {
+    const paid = isPaidSale(sale);
+    const unpaid = isUnpaidSale(sale);
+    if (!paid && !unpaid) continue; // VOIDED / REFUNDED
+
     const key = payerKeyFromSale(sale);
     const { id, name } = payerLabelFromSale(sale);
     const type = resolveTransactionType(sale);
@@ -61,8 +74,17 @@ export function summarizeSalesByPayer(sales: PosSale[]): PayerSalesSummary[] {
         subscriptionTotal: 0,
         totalCount: 0,
         totalAmount: 0,
+        unpaidCount: 0,
+        unpaidTotal: 0,
       };
       map.set(key, row);
+    }
+
+    // N: lo no cobrado no es ingreso del cajero
+    if (unpaid) {
+      row.unpaidCount += 1;
+      row.unpaidTotal += sale.total;
+      continue;
     }
 
     if (type === "subscription") {
