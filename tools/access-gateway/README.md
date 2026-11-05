@@ -36,6 +36,22 @@ Ruta alternativa del archivo: variable `TERMINALS_FILE`.
 
 En Elite → **Configuración** → pestaña **Traza ADMS** (filtros Solo datos / Fotos / Todo).
 
+## Fotos de acceso
+
+Cada foto que sube un lector (`ATTPHOTO`, binaria o base64, también `tabledata`/`rtlog` de
+firmware de control de acceso) se guarda en `captures/` junto a `server.mjs`
+(o en `CAPTURES_DIR`). Se conservan las últimas 300 (`MAX_CAPTURES`).
+Si llega un cuerpo que no se puede leer, se guarda una copia en `captures/raw/` para analizarlo.
+
+API: `GET /v1/adms/photos?limit=12` (lista con imagen) y `GET /v1/adms/photos/<id>.jpg`.
+
+Requisitos para que haya foto:
+
+1. El socio está enrolado en ese lector y hace match.
+2. En el lector: captura de foto de asistencia activada (tomar y guardar).
+3. El lector completó el registro ADMS: en la traza aparecen `push-config` o `ping`,
+   no solo `handshake` + `registry` repetidos. Si se repiten, reinicie el lector.
+
 ## Elite (PC del gym)
 
 **Configuración → Reconectar** con URL `http://127.0.0.1:8787`  

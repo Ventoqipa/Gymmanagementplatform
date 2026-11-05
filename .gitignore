@@ -41,3 +41,6 @@ coverage
 # Access Gateway: lectores detectados en el PC del gym
 tools/access-gateway/terminals.json
 tools/access-gateway/terminals.json.tmp
+# Fotos de socios que suben los lectores (datos personales, no versionar)
+tools/access-gateway/captures/
+.tmp

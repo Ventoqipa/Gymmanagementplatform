@@ -16,10 +16,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  fetchAdmsPhotos,
   fetchAdmsTrace,
   fetchGatewayActivity,
   removeGatewayTerminal,
   renameGatewayTerminal,
+  type AdmsPhotosResponse,
   type AdmsTraceResponse,
   type AdmsTraceRow,
   type GatewayActivityRow,
@@ -79,8 +81,16 @@ function friendlyActivity(message: string): string {
   if (m.includes("nuevo lector")) return "Se detectó un lector nuevo";
   if (m.includes("renombrado")) return "Se cambió el nombre de un lector";
   if (m.includes("quitado de la lista")) return "Se quitó un lector de la lista";
-  if (m.includes("attlog")) return "Registro de acceso recibido";
+  if (m.includes("histórico ignorado")) {
+    return "El lector mandó registros antiguos (se ignoraron)";
+  }
+  if (m.includes("attlog") || m.includes("rtlog")) return "Registro de acceso recibido";
+  if (m.includes("sin imagen parseable")) {
+    return "Llegó una foto que no se pudo leer (copia guardada para revisión)";
+  }
+  if (m.includes("foto de registro")) return "El lector mandó la foto de registro de un socio";
   if (m.includes("attphoto")) return "Foto de acceso recibida";
+  if (m.includes("registro completado")) return "Un lector completó su registro";
   if (m.includes("handshake") || m.includes("registry")) {
     return "Un lector se registró en el sistema";
   }
@@ -177,6 +187,7 @@ export default function AccessHardware() {
   const [trace, setTrace] = useState<AdmsTraceResponse | null>(null);
   const [traceLoading, setTraceLoading] = useState(true);
   const [traceError, setTraceError] = useState("");
+  const [photos, setPhotos] = useState<AdmsPhotosResponse | null>(null);
   const [panelBusy, setPanelBusy] = useState(false);
   const [banner, setBanner] = useState("");
 
@@ -218,11 +229,15 @@ export default function AccessHardware() {
         );
         return;
       }
-      const data = await fetchAdmsTrace({
-        limit: 100,
-        only: traceFilter,
-        hideNoise: traceFilter !== "all",
-      });
+      const [data, photoData] = await Promise.all([
+        fetchAdmsTrace({
+          limit: 100,
+          only: traceFilter,
+          hideNoise: traceFilter !== "all",
+        }),
+        fetchAdmsPhotos(12),
+      ]);
+      setPhotos(photoData);
       if (!data) {
         setTrace(null);
         setTraceError(
@@ -245,10 +260,11 @@ export default function AccessHardware() {
   }, [loadActivity]);
 
   useEffect(() => {
+    if (configTab !== "trace") return;
     void loadTrace();
     const id = window.setInterval(() => void loadTrace(), 4000);
     return () => window.clearInterval(id);
-  }, [loadTrace]);
+  }, [loadTrace, configTab]);
 
   const onRefresh = async () => {
     setPanelBusy(true);
@@ -713,7 +729,64 @@ export default function AccessHardware() {
             </div>
           ) : null}
 
-          {trace?.hint && (trace.trace.length === 0 || !trace.byHandled.attlog) ? (
+          <div className="mb-5">
+            <p className="text-[#808080] text-[10px] font-bold uppercase tracking-[1.5px] mb-2">
+              Fotos recibidas
+              {photos ? (
+                <span className="text-[#5a5a5a] font-normal normal-case tracking-normal">
+                  {" "}
+                  · {photos.total} guardada(s) en el PC del Gateway
+                </span>
+              ) : null}
+            </p>
+            {photos && photos.photos.length > 0 ? (
+              <>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                  {photos.photos.map((p) => (
+                    <div
+                      key={p.id}
+                      className="bg-[#1a1a1a] border border-[rgba(93,63,60,0.2)] overflow-hidden"
+                    >
+                      <div className="aspect-square bg-[#131313]">
+                        {p.dataUrl ? (
+                          <img
+                            src={p.dataUrl}
+                            alt={`Foto ${p.pin || "sin PIN"}`}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : null}
+                      </div>
+                      <div className="p-1.5 font-sans">
+                        <p className="text-[#e5e2e1] text-[10px] font-bold truncate">
+                          {p.kind === "biophoto"
+                            ? `Registro · PIN ${p.pin || "—"}`
+                            : p.pin && p.pin !== "0"
+                              ? `PIN ${p.pin}`
+                              : "Sin coincidencia"}
+                        </p>
+                        <p className="text-[#5a5a5a] text-[9px] truncate">
+                          {p.terminalLabel || p.serial} · {formatTime(p.atIso)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {photos.capturesDir ? (
+                  <p className="text-[#393939] text-[10px] mt-2 break-all font-mono">
+                    Carpeta: {photos.capturesDir}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-[#5a5a5a] text-[12px] font-sans">
+                {photos
+                  ? "Todavía no llega ninguna foto. Pase un socio enrolado por el lector."
+                  : "El Gateway aún no tiene la versión con fotos guardadas; actualícelo y reinícielo."}
+              </p>
+            )}
+          </div>
+
+          {trace?.hint ? (
             <p className="text-[#808080] text-[12px] mb-3 border border-[rgba(93,63,60,0.2)] px-3 py-2">
               {trace.hint}
             </p>

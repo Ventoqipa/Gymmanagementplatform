@@ -40,6 +40,7 @@ import {
   removeTerminal,
   summarizeAdmsTrace,
 } from "./store.mjs";
+import { CAPTURES_DIR, listPhotos, photosCount, readPhoto } from "./captures.mjs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
@@ -133,6 +134,24 @@ async function buildDiagnostics({ includeNetstat = false, source = "poll" } = {}
         "Diagnóstico de puertos: botón en Elite (Panel)",
       ],
   };
+}
+
+function traceHint(byHandled) {
+  const n = (k) => byHandled[k] || 0;
+  const accesses = n("attlog") + n("rtlog") + n("attlog-inferred");
+  const photos = n("attphoto");
+  const polling = n("ping") + n("getrequest-info") + n("getrequest-cmds") + n("push-config");
+  if (n("attphoto-unparsed")) {
+    return "Llegaron fotos con un formato que no se pudo leer. Hay copias en captures/raw para analizarlas.";
+  }
+  if (accesses && !photos) {
+    return "Llegan accesos pero no fotos: active en el lector la captura de foto de asistencia (tomar y guardar).";
+  }
+  if (accesses) return "";
+  if (n("registry") >= 3 && !polling) {
+    return "El lector repite el registro y no avanza. Reinicie el lector para que tome la nueva respuesta del Gateway.";
+  }
+  return "El lector está conectado pero aún no manda accesos. Pase un socio enrolado y revise de nuevo.";
 }
 
 function cors(res) {
@@ -369,9 +388,50 @@ const eliteServer = http.createServer(async (req, res) => {
       devicesOnline: terminals.filter((t) => t.online).length,
       eventsCount: events.length,
       activityCount: activityLog.length,
+      photosCount: photosCount(),
+      capturesDir: CAPTURES_DIR,
       startedAtIso,
       note: "ADMS real. SpeedFace Cloud Server → este PC.",
     });
+  }
+
+  if (req.method === "GET" && url.pathname === "/v1/adms/photos") {
+    const limit = Math.min(48, Number(url.searchParams.get("limit") || 12));
+    const withImage = url.searchParams.get("images") !== "0";
+    const terminalBySerial = new Map(
+      listTerminalStatus().map((t) => [t.serial, t]),
+    );
+    const photos = listPhotos(limit).map((p) => {
+      const t = terminalBySerial.get(p.serial);
+      const jpeg = withImage ? readPhoto(p.id) : null;
+      return {
+        ...p,
+        terminalId: t?.terminalId,
+        terminalLabel: t?.label,
+        dataUrl: jpeg ? `data:image/jpeg;base64,${jpeg.toString("base64")}` : undefined,
+      };
+    });
+    return sendJson(res, 200, {
+      ok: true,
+      total: photosCount(),
+      capturesDir: CAPTURES_DIR,
+      photos,
+    });
+  }
+
+  const photoMatch = /^\/v1\/adms\/photos\/([A-Za-z0-9_-]+)(?:\.jpg)?$/.exec(url.pathname);
+  if (req.method === "GET" && photoMatch) {
+    const jpeg = readPhoto(photoMatch[1]);
+    if (!jpeg) {
+      return sendJson(res, 404, { ok: false, code: "NOT_FOUND", message: "Foto no encontrada" });
+    }
+    cors(res);
+    res.writeHead(200, {
+      "Content-Type": "image/jpeg",
+      "Content-Length": jpeg.length,
+      "Cache-Control": "private, max-age=3600",
+    });
+    return res.end(jpeg);
   }
 
   if (req.method === "GET" && url.pathname === "/v1/terminals") {
@@ -448,8 +508,7 @@ const eliteServer = http.createServer(async (req, res) => {
       byHandled: summary.byHandled,
       byTable: summary.byTable,
       trace: entries,
-      hint:
-        "Si solo ve ping/registry/handshake, el lector está vivo pero aún no empuja ATTLOG/ATTPHOTO. Pase un socio enrolado y revise de nuevo.",
+      hint: traceHint(summary.byHandled),
     });
   }
 
@@ -603,6 +662,7 @@ eliteServer.listen(ELITE_PORT, HOST, () => {
   console.log(`  POST /v1/terminals/remove  { terminalId }  (solo desconectados)`);
   console.log(`  GET  /v1/activity`);
   console.log(`  GET  /v1/adms/trace`);
+  console.log(`  GET  /v1/adms/photos       (fotos en ${CAPTURES_DIR})`);
   console.log(`  GET  /v1/diagnostics`);
   console.log(`  POST /v1/diagnostics/run`);
   console.log(`  POST /v1/reconnect`);

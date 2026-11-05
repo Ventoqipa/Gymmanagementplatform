@@ -461,6 +461,41 @@ export async function fetchAdmsTrace(options?: {
   }
 }
 
+export type AdmsPhoto = {
+  id: string;
+  atIso: string;
+  serial: string;
+  pin: string;
+  kind: "access" | "biophoto" | string;
+  bytes: number;
+  terminalId?: string;
+  terminalLabel?: string;
+  dataUrl?: string;
+};
+
+export type AdmsPhotosResponse = {
+  ok: boolean;
+  total: number;
+  capturesDir?: string;
+  photos: AdmsPhoto[];
+};
+
+export async function fetchAdmsPhotos(limit = 12): Promise<AdmsPhotosResponse | null> {
+  if (!isAccessGatewayConfigured()) return null;
+  try {
+    const response = await fetch(
+      accessGatewayUrl(`${accessGatewayConfig.admsPhotosPath}?limit=${Math.min(48, limit)}`),
+      { method: "GET", headers: { Accept: "application/json" } },
+    );
+    if (!response.ok) return null;
+    const body = (await parseJsonSafe(response)) as AdmsPhotosResponse | null;
+    if (!body || !Array.isArray(body.photos)) return null;
+    return body;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchGatewayDiagnostics(options?: {
   netstat?: boolean;
 }): Promise<GatewayDiagnostics | null> {
