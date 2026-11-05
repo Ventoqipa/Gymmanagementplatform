@@ -7,6 +7,9 @@ export { PosTicketModal } from "./ui/PosTicketModal";
 export { CheckoutModal } from "./ui/CheckoutModal"; // N
 export { usePosTerminal } from "./hooks/usePosTerminal";
 
+export { DirectDebitModal } from "./ui/DirectDebitModal";
+export * from "./api/subscriptionService";
+
 export { createPosConfig, eliteGymPosConfig } from "./config/createPosConfig";
 export type {
   PosConfig,
