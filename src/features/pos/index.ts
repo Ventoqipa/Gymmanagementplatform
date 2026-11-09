@@ -61,7 +61,16 @@ export {
   subscriptionConceptLabel,
   ticketIdFromSaleId,
 } from "./domain/subscriptionReceipt";
-export { summarizePosSales } from "./domain/summarizeSales";
+export {
+  summarizePosSales,
+  summarizePosSalesBreakdown,
+  isPaidSale,
+  isUnpaidSale,
+  isRefundedSale,
+  salePaymentStatus,
+  salePaymentMethodGroup,
+} from "./domain/summarizeSales";
+export type { PosSalesBreakdown } from "./domain/summarizeSales";
 export {
   filterSalesByPayer,
   payerKeyFromSale,

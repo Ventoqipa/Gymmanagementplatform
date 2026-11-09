@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { Activity, DollarSign, Loader2, TrendingUp, Users } from "lucide-react";
 import type { PosSale } from "@/features/pos";
+import { isPaidSale } from "@/features/pos"; // N
 import { getGymPosService } from "../config/gymPosService";
 import { listClientsUseCase } from "../core/catalog";
 import { useAuth } from "../context/AuthContext";
@@ -124,13 +125,22 @@ export default function Dashboard() {
 
   const recentMembers = useMemo(() => members.slice(0, 10), [members]);
 
-  const revenue = useMemo(
-    () => buildRevenueToday(posSalesToday),
+  // N: solo ventas cobradas (excluye pendientes, rechazadas, canceladas, anuladas y reembolsadas)
+  const paidSalesToday = useMemo(
+    () => posSalesToday.filter(isPaidSale),
     [posSalesToday],
   );
+  // N: ventas de hoy que no se cobraron (solo para el aviso)
+  const unpaidTodayCount = posSalesToday.length - paidSalesToday.length;
+
+  // CAMBIO: ingresos y actividad solo con lo cobrado
+  const revenue = useMemo(
+    () => buildRevenueToday(paidSalesToday),
+    [paidSalesToday],
+  );
   const activity = useMemo(
-    () => buildRecentActivity(posSalesToday),
-    [posSalesToday],
+    () => buildRecentActivity(paidSalesToday),
+    [paidSalesToday],
   );
 
   const capacityPct =
