@@ -63,14 +63,20 @@ type PaymentTerminalsResponse = ApiResponse & {
   data?: PaymentTerminal[];
 };
 
-// NUEVO
-type RefundPointOrderResponse = ApiResponse & {
-  data?: {
-    saleId?: string;
-    order_id?: string;
-    paymentStatus?: PaymentStatus;
-  };
-};
+// CAMBIO: datos que devuelve el backend al reembolsar
+export interface RefundResult {
+  saleId: string;
+  paymentStatus: PaymentStatus;
+  /** Mercado Pago aceptó el reembolso pero aún no lo confirma */
+  refundPending: boolean;
+  transactionType: 'product' | 'subscription' | string;
+  subscriptionConcept: string | null;
+  periodKey: string | null;
+  memberId: string | null;
+  total: number | null;
+  /** La venta ya estaba reembolsada antes de esta llamada (409 / 33) */
+  alreadyRefunded: boolean;
+}
 
 // NUEVO: headers comunes
 function headers(withJson = false): HeadersInit {
@@ -166,19 +172,26 @@ export async function cancelPointOrder(saleId: string): Promise<boolean> {
   }
 }
 
-// NUEVO: POST /api/v1/sales/{saleId}/point-refund
-export async function refundPointOrder(saleId: string): Promise<RefundPointOrderResponse> {
+// CAMBIO: POST /api/v1/sales/{saleId}/point-refund
+export async function refundPointOrder(saleId: string): Promise<RefundResult> {
   const response = await fetch(`${API_BASE_URL}/sales/${encodeURIComponent(saleId)}/point-refund`, {
     method: 'POST',
     headers: headers(true),
   });
 
   const data = await parseJson(response);
+  const payload = (data.data ?? {}) as Partial<RefundResult>;
+
+  // Ya estaba reembolsada: no es error, pero no hay que volver a ajustar nada
+  if (response.status === 409 && Number(data.errorNumber) === 33) {
+    return { ...payload, saleId, paymentStatus: 'REFUNDED', refundPending: false, alreadyRefunded: true } as RefundResult;
+  }
+
   if (!response.ok) {
     throw new Error(getResponseMessage(data, 'Error al reembolsar el cobro'));
   }
 
-  return data as RefundPointOrderResponse;
+  return { ...payload, saleId, alreadyRefunded: false } as RefundResult;
 }
 
 // Ventas con tarjeta sin pagar
