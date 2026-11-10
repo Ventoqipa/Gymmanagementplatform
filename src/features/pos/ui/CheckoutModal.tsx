@@ -8,11 +8,18 @@ import {
     type PaymentTerminal,
 } from '../api/pointPaymentService';
 
+// N: lo que se le pasa al padre cuando el pago se aprueba
+export type CheckoutSuccessInfo = {
+    installments: number;
+    cardBrand?: string | null; // visa, master, amex...
+    cardType?: string | null;  // credit_card / debit_card
+};
+
 interface CheckoutModalProps {
     saleId: string;
     onClose: () => void;
-    // Recibe las cuotas (opcional, así no rompe a quien ya usa onSuccess())
-    onSuccess: (info?: { installments: number }) => void;
+    // Recibe meses y tarjeta (opcional, así no rompe a quien ya usa onSuccess())
+    onSuccess: (info?: CheckoutSuccessInfo) => void;
 }
 
 // CAMBIO: 'canceling' (cancelando por API) y 'voided' (venta anulada)
@@ -69,6 +76,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
         const status = data?.paymentStatus;
         const installments = data?.installments ?? 1;
         const detail = data?.mp_status_detail;
+        const cardBrand = data?.cardBrand ?? null; // N
+        const cardType = data?.cardType ?? null;   // N
 
         if (!status || ! FINAL_STATUSES.includes(status)) {
             setStatusMessage(waitingMessage(data?.mp_status));
@@ -81,7 +90,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ saleId, onClose, o
             case 'APPROVED':
                 setPhase('approved');
                 setStatusMessage(installments > 1 ? `Pago aprobado · ${installments} MSI` : 'Pago aprobado');
-                successTimeoutRef.current = setTimeout(() => onSuccess({ installments }), 1500);
+                successTimeoutRef.current = setTimeout(() => onSuccess({ installments, cardBrand, cardType }), 1500); // CAMBIO
                 break;
             case 'REJECTED':
                 setPhase('rejected');
