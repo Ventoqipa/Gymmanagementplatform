@@ -74,3 +74,32 @@ export function updateDirectDebitCard(id: string, cardTokenId: string) {
     cardTokenId,
   });
 }
+
+/** N: un cobro mensual del domiciliado */
+export type DirectDebitCharge = {
+  id: string;
+  amount: number;
+  debitDate: number | null;
+  /** scheduled | recycling | processed | cancelled | waiting for gateway */
+  status: string;
+  /** Intento actual (Mercado Pago hace hasta 4) */
+  retryAttempt: number;
+  nextRetryDate: number | null;
+  /** approved | rejected | ... */
+  paymentStatus: string | null;
+  paymentDetail: string | null;
+};
+
+export type DirectDebitCharges = {
+  summary: {
+    quotas: number | null;
+    chargedQuantity: number | null;
+    semaphore: "green" | "yellow" | "red" | null;
+    lastChargedDate: number | null;
+  } | null;
+  charges: DirectDebitCharge[];
+};
+
+export function getDirectDebitCharges(id: string) {
+  return posGet<DirectDebitCharges>(config(), POS_API_PATHS.subscriptionCharges(id));
+}

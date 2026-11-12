@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { CardPayment } from "@mercadopago/sdk-react";
-import { CheckCircle2, CreditCard, Loader2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CreditCard, Loader2, X } from "lucide-react";
+import { toast } from "sonner";
 import { ensureMercadoPago } from "./DirectDebitModal";
 import {
   cancelDirectDebit,
+  getDirectDebitCharges,
   getMemberDirectDebit,
   updateDirectDebitCard,
+  type DirectDebitCharge,
   type DirectDebitSubscription,
 } from "../api/subscriptionService";
 
@@ -35,6 +38,71 @@ const shortDate = (v?: number | string | null) =>
     ? new Date(v).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" })
     : "—";
 
+const MAX_RETRIES = 4;
+
+// N: motivo de rechazo en palabras simples
+const REJECT_REASON: Record<string, string> = {
+  cc_rejected_insufficient_amount: "Fondos insuficientes",
+  cc_rejected_card_disabled: "Tarjeta desactivada",
+  cc_rejected_bad_filled_security_code: "Código de seguridad incorrecto",
+  cc_rejected_bad_filled_date: "Fecha de vencimiento incorrecta",
+  cc_rejected_high_risk: "Rechazado por seguridad",
+  cc_rejected_call_for_authorize: "El banco pide autorizar el cargo",
+  cc_rejected_other_reason: "Rechazado por el banco",
+};
+
+const rejectReason = (c: DirectDebitCharge) =>
+  (c.paymentDetail && REJECT_REASON[c.paymentDetail]) || "Rechazado por el banco";
+
+// N: cómo mostrar cada cobro
+function chargeLabel(c: DirectDebitCharge): { text: string; className: string } {
+  if (c.status === "recycling") {
+    return { text: `Reintentando (${c.retryAttempt}/${MAX_RETRIES})`, className: "text-[#ffcc80]" };
+  }
+  if (c.status === "processed" && c.paymentStatus === "approved") {
+    return { text: "Cobrado", className: "text-[#69f0ae]" };
+  }
+  if (c.status === "processed") {
+    return { text: "No se pudo cobrar", className: "text-[#ff6b6b]" };
+  }
+  if (c.status === "waiting for gateway") return { text: "Procesando", className: "text-[#b8d4ff]" };
+  if (c.status === "cancelled") return { text: "Cancelado", className: "text-[#a0a0a0]" };
+  return { text: "Programado", className: "text-[#808080]" };
+}
+
+// N: el aviso más importante (o null si todo va bien)
+function buildAlert(charges: DirectDebitCharge[], semaphore?: string | null) {
+  const failed = charges.filter((c) => c.status === "processed" && c.paymentStatus !== "approved");
+  const retrying = charges.find((c) => c.status === "recycling");
+
+  if (retrying) {
+    return {
+      level: "warn" as const,
+      title: `Cobro rechazado · ${rejectReason(retrying)}`,
+      detail: `Intento ${retrying.retryAttempt} de ${MAX_RETRIES} · próximo intento: ${shortDate(retrying.nextRetryDate)}.`,
+      hint: "Pide al socio revisar su tarjeta o cambiarla.",
+    };
+  }
+  if (failed.length > 0) {
+    const last = failed[0];
+    return {
+      level: "error" as const,
+      title: `No se pudo cobrar el ${shortDate(last.debitDate)} · ${rejectReason(last)}`,
+      detail: `${failed.length} mensualidad${failed.length === 1 ? "" : "es"} sin cobrar. Con 3, Mercado Pago cancela el domiciliado.`,
+      hint: "Cobra la mensualidad en caja o cambia la tarjeta.",
+    };
+  }
+  if (semaphore === "red" || semaphore === "yellow") {
+    return {
+      level: semaphore === "red" ? ("error" as const) : ("warn" as const),
+      title: "Mercado Pago reporta problemas con este domiciliado",
+      detail: "Revisa los cobros de abajo.",
+      hint: "",
+    };
+  }
+  return null;
+}    
+
 export function DirectDebitManageModal({
   memberId,
   memberName,
@@ -48,8 +116,12 @@ export function DirectDebitManageModal({
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [doneMessage, setDoneMessage] = useState("");
+  // N: cobros e intentos
+  const [charges, setCharges] = useState<DirectDebitCharge[]>([]);
+  const [semaphore, setSemaphore] = useState<string | null>(null);
+  const [chargesLoading, setChargesLoading] = useState(false);
 
-  // Carga el domiciliado activo del socio
+  // Carga el domiciliado activo del socio y sus cobros
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -58,6 +130,25 @@ export function DirectDebitManageModal({
         if (cancelled) return;
         setSub(found);
         setPhase(found ? "view" : "none");
+
+        // N: cobros e intentos (no bloquea la pantalla si falla)
+        if (found?.mpPreapprovalId) {
+          setChargesLoading(true);
+          try {
+            const res = await getDirectDebitCharges(found.id);
+            if (cancelled) return;
+            setCharges(res.charges);
+            setSemaphore(res.summary?.semaphore ?? null);
+            const firstAlert = buildAlert(res.charges, res.summary?.semaphore);
+            if (firstAlert) {
+              toast.warning(firstAlert.title, { description: firstAlert.detail, duration: 10_000 });
+            }
+          } catch {
+            // se muestra el domiciliado aunque no se puedan leer los cobros
+          } finally {
+            if (!cancelled) setChargesLoading(false);
+          }
+        }
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "No se pudo consultar el domiciliado.");
@@ -117,6 +208,8 @@ export function DirectDebitManageModal({
     className: "text-[#a0a0a0] border-[#5a5a5a]/50 bg-[#2a2a2a]",
   };
 
+  const alert = buildAlert(charges, semaphore); // N
+
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4">
       <div className="relative w-full max-w-md max-h-[92vh] overflow-y-auto border border-[rgba(93,63,60,0.3)] bg-[#131313] p-5 sm:p-6 shadow-2xl">
@@ -160,6 +253,22 @@ export function DirectDebitManageModal({
 
         {phase === "view" && sub && (
           <div className="space-y-4">
+            {/* N: aviso de cobros rechazados */}
+            {alert && (
+              <div
+                className={`border px-3 py-2.5 text-[11px] leading-relaxed ${
+                  alert.level === "error"
+                    ? "border-[#e31e24]/50 bg-[#e31e24]/10 text-[#ffb4ae]"
+                    : "border-[#ffa726]/45 bg-[#ffa726]/10 text-[#ffcc80]"
+                }`}
+              >
+                <p className="font-bold flex items-center gap-1.5">
+                  <AlertTriangle size={13} /> {alert.title}
+                </p>
+                <p className="mt-0.5">{alert.detail}</p>
+                {alert.hint && <p className="mt-0.5 opacity-80">{alert.hint}</p>}
+              </div>
+            )}
             <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] p-4 space-y-2 text-[12px]">
               <div className="flex justify-between items-center">
                 <span className="text-[#808080]">Estado</span>
@@ -177,6 +286,31 @@ export function DirectDebitManageModal({
                 <span className="text-[#808080]">Próximo cargo</span>
                 <span className="text-[#e5e2e1] font-bold">{shortDate(sub.nextPaymentDate)}</span>
               </div>
+            </div>
+
+            {/* N: historial de cobros */}
+            <div>
+              <p className="text-[#808080] text-[9px] font-bold uppercase tracking-wide mb-2">Cobros</p>
+              {chargesLoading ? (
+                <p className="flex items-center gap-2 text-[#808080] text-[11px]">
+                  <Loader2 size={12} className="animate-spin" /> Consultando cobros…
+                </p>
+              ) : charges.length === 0 ? (
+                <p className="text-[#5a5a5a] text-[11px]">Todavía no hay cobros registrados.</p>
+              ) : (
+                <ul className="space-y-1.5 max-h-[180px] overflow-y-auto">
+                  {charges.map((c) => {
+                    const l = chargeLabel(c);
+                    return (
+                      <li key={c.id} className="flex justify-between gap-2 text-[11px] border-b border-[rgba(93,63,60,0.1)] pb-1.5">
+                        <span className="text-[#a8a4a3]">{shortDate(c.debitDate)}</span>
+                        <span className="text-[#e5e2e1] tabular-nums">${money(c.amount)}</span>
+                        <span className={`font-bold ${l.className}`}>{l.text}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
 
             <button
