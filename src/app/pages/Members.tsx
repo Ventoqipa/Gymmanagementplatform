@@ -27,6 +27,7 @@ import {
   Download,
   FileText,
   ExternalLink,
+  CreditCard,
 } from "lucide-react";
 import { getSessionPayer } from "../core/auth/authStorage";
 import {
@@ -37,6 +38,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { addMembershipPayment } from "../lib/demoStore";
 import { getGymPosService } from "../config/gymPosService";
+import { DirectDebitManageModal } from "@/features/pos/ui/DirectDebitManageModal";
 import {
   PosTicketModal,
   CheckoutModal, // N
@@ -764,6 +766,13 @@ export default function Members() {
     periodKey: string | null;
     priceBranchFrequencyID: number;
     onAuthorized: () => void;
+  } | null>(null);
+
+  // N: socio cuyo domiciliado se está administrando
+  const [manageDebitFor, setManageDebitFor] = useState<{
+    memberId: string;
+    memberName: string;
+    email?: string;
   } | null>(null);
 
   const directPayOptions = useMemo(
@@ -2550,6 +2559,23 @@ export default function Members() {
                         <ShoppingCart size={14} />
                         Vender en tienda
                       </button>
+                      {/* N: administrar domiciliado (solo si el socio lo tiene) */}
+                      {member.isDirectDebit ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setManageDebitFor({
+                              memberId: member.id,
+                              memberName: memberFullName(member),
+                              email: member.email,
+                            })
+                          }
+                          className="inline-flex items-center justify-center gap-2 bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] px-4 py-2.5 text-[10px] font-bold tracking-[1px] uppercase hover:border-[#e31e24] transition-colors"
+                        >
+                          <CreditCard size={14} />
+                          Domiciliado
+                        </button>
+                      ) : null}
                     </div>
                     <div className="w-full flex flex-wrap items-center gap-x-4 gap-y-2 rounded border border-[rgba(93,63,60,0.12)] bg-[#131313] px-4 py-3">
                       <span className="text-[#808080] text-[9px] font-bold uppercase tracking-wide shrink-0">
@@ -4663,6 +4689,16 @@ export default function Members() {
             setDirectDebitCheckout(null);
             pending.onAuthorized();
           }}
+        />
+      )}
+
+      {/* N: administrar domiciliado (cambiar tarjeta / cancelar) */}
+      {manageDebitFor && (
+        <DirectDebitManageModal
+          memberId={manageDebitFor.memberId}
+          memberName={manageDebitFor.memberName}
+          defaultEmail={manageDebitFor.email}
+          onClose={() => setManageDebitFor(null)}
         />
       )}
 

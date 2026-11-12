@@ -9,7 +9,7 @@ import {
 const MP_PUBLIC_KEY = import.meta.env.VITE_MP_PUBLIC_KEY as string | undefined;
 let mpInitialized = false;
 
-function ensureMercadoPago(): boolean {
+export function ensureMercadoPago(): boolean {
   if (!MP_PUBLIC_KEY) return false;
   if (!mpInitialized) {
     initMercadoPago(MP_PUBLIC_KEY, { locale: "es-MX" });

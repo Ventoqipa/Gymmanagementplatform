@@ -67,3 +67,10 @@ export function getMemberDirectDebit(memberId: string) {
 export function cancelDirectDebit(id: string) {
   return posPost<DirectDebitSubscription>(config(), POS_API_PATHS.subscriptionCancel(id), {});
 }
+
+/** N: cambia la tarjeta del domiciliado (no cobra en ese momento). */
+export function updateDirectDebitCard(id: string, cardTokenId: string) {
+  return posPost<DirectDebitSubscription>(config(), POS_API_PATHS.subscriptionCard(id), {
+    cardTokenId,
+  });
+}
