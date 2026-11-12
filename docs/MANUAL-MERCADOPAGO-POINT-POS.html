@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pagos con terminal Mercado Pago Point — Integración en el POS</title>
+  <style>
+    @page { size: Letter; margin: 16mm 15mm 16mm 15mm; }
+    :root {
+      --red: #e31e24;
+      --ink: #1a1a1a;
+      --muted: #5a5a5a;
+      --line: #e8e0df;
+      --soft: #f7f4f3;
+      --mp: #009ee3;
+      --ok: #1a9c3c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
+      color: var(--ink);
+      font-size: 10.5pt;
+      line-height: 1.4;
+    }
+    .page { page-break-after: always; position: relative; }
+    .page:last-child { page-break-after: auto; }
+    h1, h2, h3 { margin: 0 0 0.4em; letter-spacing: -0.02em; }
+    h2 {
+      font-size: 16pt;
+      color: var(--red);
+      border-bottom: 2px solid var(--red);
+      padding-bottom: 6px;
+      margin-bottom: 12px;
+    }
+    h3 { font-size: 12pt; margin-top: 12px; }
+    p { margin: 0 0 8px; }
+    ul, ol { margin: 0 0 10px; padding-left: 1.25em; }
+    li { margin-bottom: 4px; }
+    code { font-family: Menlo, Consolas, monospace; font-size: 9pt; background: var(--soft); padding: 1px 4px; }
+    .muted { color: var(--muted); }
+    .cover {
+      min-height: 247mm;
+      margin: -16mm -15mm;
+      width: calc(100% + 30mm);
+      padding: 28mm 18mm;
+      background: linear-gradient(160deg, #0f1418 0%, #13232f 45%, #0e0e0e 100%);
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .badge {
+      display: inline-block;
+      background: var(--red);
+      color: #fff;
+      font-size: 9pt;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 6px 10px;
+      margin-bottom: 16px;
+    }
+    .cover-brand { font-size: 11pt; letter-spacing: 0.28em; text-transform: uppercase; color: var(--mp); font-weight: 700; }
+    .cover h1 { color: #fff; font-size: 32pt; line-height: 1.1; margin-top: 16px; }
+    .cover .lead { color: #c3ccd2; font-size: 13pt; max-width: 40em; margin-top: 16px; }
+    .cover-meta { border-top: 1px solid rgba(255,255,255,0.15); padding-top: 14px; font-size: 10pt; color: #a0a8ae; }
+    .illus { display: block; width: 100%; margin: 8px auto 12px; }
+    .card { background: var(--soft); border: 1px solid var(--line); padding: 12px 14px; margin: 10px 0; }
+    .mini-title { font-size: 9pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--red); font-weight: 700; margin-bottom: 6px; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .warn { border-left: 4px solid var(--red); background: #fff5f5; padding: 9px 12px; margin: 10px 0; }
+    .ok { border-left: 4px solid var(--ok); background: #f3faf5; padding: 9px 12px; margin: 10px 0; }
+    .info { border-left: 4px solid var(--mp); background: #f0f8fd; padding: 9px 12px; margin: 10px 0; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 9.5pt; }
+    th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: var(--soft); font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .goal { display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: start; border: 1px solid var(--line); padding: 9px 10px; margin-bottom: 8px; }
+    .goal .id { background: var(--red); color: #fff; font-weight: 800; text-align: center; padding: 6px 0; font-size: 10pt; }
+    .goal strong { display: block; }
+    .footer-note { margin-top: 14px; font-size: 8.5pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; }
+  </style>
+</head>
+<body>
+
+  <!-- PORTADA -->
+  <section class="page cover">
+    <div>
+      <div class="badge">Documento de arquitectura y operación</div>
+      <div class="cover-brand">Elite Gym 24/7 · Mercado Pago Point</div>
+      <h1>Pagos con terminal física:<br/>contado y meses sin intereses</h1>
+      <p class="lead">
+        Cómo deben funcionar los cobros directos y a MSI con la terminal Mercado Pago Point,
+        y por qué la integración vive en el <strong>POS</strong> y no en la plataforma del gimnasio.
+      </p>
+    </div>
+    <div class="cover-meta">
+      <div>Alcance: POS (módulo React + POS API PHP) · Terminal Point en modo PDV</div>
+      <div>Público: equipo técnico, negocio y responsables del gimnasio</div>
+      <div>Base técnica: Mercado Pago Orders API + Webhooks</div>
+    </div>
+  </section>
+
+  <!-- 1. RESUMEN -->
+  <section class="page">
+    <h2>1. Resumen y decisión</h2>
+    <p>
+      El gimnasio cobra membresías y productos en recepción. Se integra una terminal física
+      <strong>Mercado Pago Point</strong> para que el cajero no capture el monto a mano: el sistema envía el cobro
+      a la terminal, el socio paga con tarjeta (de contado o a meses sin intereses) y el resultado regresa solo.
+    </p>
+
+    <div class="info">
+      <strong>Decisión:</strong> toda la integración con Mercado Pago (credenciales, órdenes, terminal, webhooks,
+      MSI, conciliación) vive en el <strong>POS</strong>. La plataforma del gimnasio (Elite) solo pide
+      “cobra esta venta” y recibe “pagada / no pagada”.
+    </div>
+
+    <svg class="illus" viewBox="0 0 720 300" role="img" aria-label="Arquitectura: Elite usa el POS y el POS habla con Mercado Pago">
+      <defs>
+        <marker id="a1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1a1a1a"/></marker>
+        <marker id="a2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#009ee3"/></marker>
+      </defs>
+      <rect width="720" height="300" fill="#f7f4f3"/>
+
+      <!-- Elite -->
+      <rect x="20" y="30" width="170" height="150" rx="8" fill="#fff" stroke="#1a1a1a" stroke-width="2"/>
+      <text x="105" y="56" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#1a1a1a">Elite (gimnasio)</text>
+      <text x="105" y="80" text-anchor="middle" font-family="Arial" font-size="10.5" fill="#5a5a5a">Miembros · Renovaciones</text>
+      <text x="105" y="96" text-anchor="middle" font-family="Arial" font-size="10.5" fill="#5a5a5a">Vigencia · Control de acceso</text>
+      <rect x="40" y="118" width="130" height="44" rx="4" fill="#f7f4f3" stroke="#c9b8b6"/>
+      <text x="105" y="136" text-anchor="middle" font-family="Arial" font-size="10" fill="#1a1a1a">Solo sabe:</text>
+      <text x="105" y="152" text-anchor="middle" font-family="Arial" font-size="10" font-weight="700" fill="#1a9c3c">pagada / no pagada</text>
+
+      <!-- POS -->
+      <rect x="250" y="20" width="230" height="200" rx="8" fill="#fff" stroke="#e31e24" stroke-width="2.5"/>
+      <text x="365" y="46" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#e31e24">POS</text>
+      <rect x="268" y="60" width="194" height="52" rx="4" fill="#fff5f5" stroke="#e31e24"/>
+      <text x="365" y="80" text-anchor="middle" font-family="Arial" font-size="11" font-weight="700" fill="#1a1a1a">Módulo POS (React)</text>
+      <text x="365" y="98" text-anchor="middle" font-family="Arial" font-size="9.5" fill="#5a5a5a">Carrito · Cobro · Estado en pantalla</text>
+      <rect x="268" y="124" width="194" height="80" rx="4" fill="#fff5f5" stroke="#e31e24"/>
+      <text x="365" y="144" text-anchor="middle" font-family="Arial" font-size="11" font-weight="700" fill="#1a1a1a">POS API (PHP)</text>
+      <text x="365" y="161" text-anchor="middle" font-family="Arial" font-size="9.5" fill="#5a5a5a">Ventas · Órdenes MP · Idempotencia</text>
+      <text x="365" y="176" text-anchor="middle" font-family="Arial" font-size="9.5" fill="#5a5a5a">Webhooks · Conciliación · MSI</text>
+      <text x="365" y="191" text-anchor="middle" font-family="Arial" font-size="9.5" fill="#5a5a5a">Credenciales (solo aquí)</text>
+      <line x1="365" y1="112" x2="365" y2="124" stroke="#e31e24" stroke-width="2"/>
+
+      <!-- MP -->
+      <rect x="540" y="30" width="160" height="70" rx="8" fill="#009ee3"/>
+      <text x="620" y="60" text-anchor="middle" font-family="Arial" font-size="12" font-weight="700" fill="#fff">Mercado Pago</text>
+      <text x="620" y="78" text-anchor="middle" font-family="Arial" font-size="10" fill="#e6f6fd">Orders API</text>
+
+      <!-- Terminal -->
+      <rect x="560" y="150" width="120" height="80" rx="10" fill="#1a1a1a"/>
+      <rect x="578" y="164" width="84" height="38" rx="3" fill="#333"/>
+      <text x="620" y="188" text-anchor="middle" font-family="Arial" font-size="10" fill="#009ee3" font-weight="700">$ 1,200.00</text>
+      <text x="620" y="220" text-anchor="middle" font-family="Arial" font-size="10" fill="#ccc">Terminal Point</text>
+
+      <!-- Arrows -->
+      <path d="M190 105 H250" stroke="#1a1a1a" stroke-width="2" marker-end="url(#a1)"/>
+      <text x="220" y="98" text-anchor="middle" font-family="Arial" font-size="9" fill="#1a1a1a">cobrar</text>
+      <path d="M250 150 H190" stroke="#1a9c3c" stroke-width="2" marker-end="url(#a1)"/>
+      <text x="220" y="166" text-anchor="middle" font-family="Arial" font-size="9" fill="#1a9c3c">resultado</text>
+      <path d="M480 150 L540 75" stroke="#009ee3" stroke-width="2" marker-end="url(#a2)"/>
+      <text x="520" y="128" text-anchor="middle" font-family="Arial" font-size="9" fill="#009ee3">crear orden</text>
+      <path d="M620 100 V150" stroke="#009ee3" stroke-width="2" marker-end="url(#a2)"/>
+      <path d="M560 210 Q500 250 470 205" stroke="#009ee3" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#a2)"/>
+      <text x="520" y="262" text-anchor="middle" font-family="Arial" font-size="9" fill="#009ee3">webhook (resultado)</text>
+
+      <!-- Forbidden -->
+      <path d="M150 30 Q360 -10 560 40" stroke="#e31e24" stroke-width="2" fill="none" stroke-dasharray="6 5"/>
+      <circle cx="360" cy="12" r="11" fill="#fff" stroke="#e31e24" stroke-width="2"/>
+      <path d="M353 5 L367 19 M367 5 L353 19" stroke="#e31e24" stroke-width="2.5"/>
+      <text x="360" y="285" text-anchor="middle" font-family="Arial" font-size="10" fill="#e31e24" font-weight="700">Elite nunca habla directo con Mercado Pago ni con la terminal</text>
+    </svg>
+
+    <h3>En una frase por pieza</h3>
+    <table>
+      <thead><tr><th>Pieza</th><th>Decide / hace</th><th>No debe</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Elite</strong></td><td>Qué se cobra (membresía, periodo, precio del plan) y qué pasa después del pago (vigencia, acceso).</td><td>Conocer Mercado Pago, la terminal, tokens, webhooks o MSI.</td></tr>
+        <tr><td><strong>Módulo POS (React)</strong></td><td>Pantalla de cobro: elegir “Terminal Mercado Pago”, mostrar el progreso y el resultado.</td><td>Tener credenciales o declarar un pago como aprobado.</td></tr>
+        <tr><td><strong>POS API (PHP)</strong></td><td>Crear la orden, validar el monto, idempotencia, recibir y validar webhooks, registrar la venta y las cuotas.</td><td>Decidir reglas del gimnasio (vigencia, acceso).</td></tr>
+        <tr><td><strong>Mercado Pago</strong></td><td>Procesar la tarjeta, ofrecer MSI según la configuración de la cuenta.</td><td>Ser la fuente de verdad de nuestras ventas.</td></tr>
+        <tr><td><strong>Terminal Point</strong></td><td>Interacción física con el socio (tarjeta, NIP, elección de meses).</td><td>Recibir montos capturados a mano por el cajero.</td></tr>
+      </tbody>
+    </table>
+    <div class="footer-note">Elite Gym 24/7 · Pagos con Mercado Pago Point · Integración en el POS</div>
+  </section>
+
+  <!-- 2. POR QUÉ EN EL POS -->
+  <section class="page">
+    <h2>2. ¿Por qué en el POS y no en la plataforma del gimnasio?</h2>
+    <p>
+      El POS ya es el dueño de las ventas: hoy Elite registra las renovaciones llamando al POS
+      (<code>PosService.checkoutSubscription</code>) y la Tienda cobra productos desde el mismo módulo.
+      Un cobro con terminal es una forma más de pagar una venta; por eso pertenece al POS.
+    </p>
+
+    <div class="three-col">
+      <div class="card">
+        <div class="mini-title">Escalabilidad</div>
+        <ul style="margin:0">
+          <li>Una sola integración sirve a Tienda, renovaciones y cualquier sucursal o negocio que use el POS.</li>
+          <li>Agregar terminales o cajas se configura en el POS, sin tocar Elite.</li>
+          <li>Un solo lugar para credenciales, webhooks y conciliación.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="mini-title">Desacoplamiento</div>
+        <ul style="margin:0">
+          <li>Elite no depende de Mercado Pago: si mañana se cambia de proveedor, Elite no cambia.</li>
+          <li>Una caída de Mercado Pago no rompe Miembros ni Control de acceso.</li>
+          <li>Contrato pequeño y estable: “cobra” → “pagada / no pagada”.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="mini-title">Cohesión</div>
+        <ul style="margin:0">
+          <li>Todo lo de cobrar vive junto: venta, monto, método, cuotas, ticket y conciliación.</li>
+          <li>Los reportes de ventas ya salen del POS; los pagos con terminal aparecen ahí sin trabajo extra.</li>
+          <li>Elite se queda con lo que es del gimnasio: socios, vigencia y acceso.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Comparación</h3>
+    <table>
+      <thead><tr><th>Tema</th><th>Integración en Elite (no recomendado)</th><th>Integración en el POS (decisión)</th></tr></thead>
+      <tbody>
+        <tr><td>Credenciales de Mercado Pago</td><td>Repartidas entre plataforma y POS</td><td>Solo en el servidor del POS</td></tr>
+        <tr><td>Cobro de productos en Tienda</td><td>Habría que duplicar la integración</td><td>Misma integración para todo</td></tr>
+        <tr><td>Reportes y conciliación</td><td>Ventas en dos lugares</td><td>Una sola fuente de ventas</td></tr>
+        <tr><td>Cambiar de proveedor o agregar otro</td><td>Cambios en Elite y en POS</td><td>Solo cambia el POS</td></tr>
+        <tr><td>Nuevas sucursales / negocios</td><td>Cada plataforma integra por su cuenta</td><td>Reutilizan el POS</td></tr>
+        <tr><td>Pruebas</td><td>Hay que probar Elite contra Mercado Pago</td><td>Elite se prueba con un POS simulado</td></tr>
+      </tbody>
+    </table>
+
+    <svg class="illus" viewBox="0 0 720 150" role="img" aria-label="Capas: gimnasio arriba, POS en medio, proveedores abajo">
+      <rect width="720" height="150" fill="#fff"/>
+      <rect x="20" y="10" width="680" height="36" rx="4" fill="#1a1a1a"/>
+      <text x="360" y="33" text-anchor="middle" font-family="Arial" font-size="12" fill="#fff" font-weight="700">Dominio del gimnasio — Elite: socios, planes, vigencia, acceso</text>
+      <rect x="20" y="56" width="680" height="36" rx="4" fill="#e31e24"/>
+      <text x="360" y="79" text-anchor="middle" font-family="Arial" font-size="12" fill="#fff" font-weight="700">POS — ventas, métodos de pago, tickets, conciliación (contrato estable)</text>
+      <rect x="20" y="102" width="220" height="36" rx="4" fill="#009ee3"/>
+      <text x="130" y="125" text-anchor="middle" font-family="Arial" font-size="11" fill="#fff" font-weight="700">Mercado Pago Point</text>
+      <rect x="250" y="102" width="220" height="36" rx="4" fill="#f7f4f3" stroke="#c9b8b6"/>
+      <text x="360" y="125" text-anchor="middle" font-family="Arial" font-size="11" fill="#5a5a5a">Efectivo / transferencia</text>
+      <rect x="480" y="102" width="220" height="36" rx="4" fill="#f7f4f3" stroke="#c9b8b6" stroke-dasharray="5 4"/>
+      <text x="590" y="125" text-anchor="middle" font-family="Arial" font-size="11" fill="#5a5a5a">Otro proveedor (futuro)</text>
+    </svg>
+    <p class="muted" style="text-align:center">Cada capa solo conoce a la de abajo por su contrato. Cambiar un proveedor no sube a Elite.</p>
+    <div class="footer-note">Elite Gym 24/7 · Pagos con Mercado Pago Point · Integración en el POS</div>
+  </section>
+
+  <!-- 3. PAGO DIRECTO -->
+  <section class="page">
+    <h2>3. Cómo funciona un pago directo (contado)</h2>
+
+    <svg class="illus" viewBox="0 0 720 360" role="img" aria-label="Secuencia del pago directo con terminal Point">
+      <defs>
+        <marker id="s1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1a1a1a"/></marker>
+        <marker id="s2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#009ee3"/></marker>
+        <marker id="s3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1a9c3c"/></marker>
+      </defs>
+      <rect width="720" height="360" fill="#fff"/>
+      <g font-family="Arial" font-size="11" font-weight="700" text-anchor="middle">
+        <rect x="10" y="8" width="120" height="30" rx="4" fill="#1a1a1a"/><text x="70" y="28" fill="#fff">Cajero</text>
+        <rect x="150" y="8" width="130" height="30" rx="4" fill="#e31e24"/><text x="215" y="28" fill="#fff">POS (pantalla)</text>
+        <rect x="300" y="8" width="130" height="30" rx="4" fill="#e31e24"/><text x="365" y="28" fill="#fff">POS API</text>
+        <rect x="450" y="8" width="130" height="30" rx="4" fill="#009ee3"/><text x="515" y="28" fill="#fff">Mercado Pago</text>
+        <rect x="600" y="8" width="110" height="30" rx="4" fill="#333"/><text x="655" y="28" fill="#fff">Terminal</text>
+      </g>
+      <g stroke="#ddd" stroke-dasharray="4 4">
+        <line x1="70" y1="40" x2="70" y2="350"/><line x1="215" y1="40" x2="215" y2="350"/>
+        <line x1="365" y1="40" x2="365" y2="350"/><line x1="515" y1="40" x2="515" y2="350"/>
+        <line x1="655" y1="40" x2="655" y2="350"/>
+      </g>
+      <g font-family="Arial" font-size="9.5" fill="#1a1a1a">
+        <path d="M70 62 H213" stroke="#1a1a1a" stroke-width="1.6" marker-end="url(#s1)"/>
+        <text x="142" y="56" text-anchor="middle">1. “Cobrar con terminal”</text>
+        <path d="M215 92 H363" stroke="#1a1a1a" stroke-width="1.6" marker-end="url(#s1)"/>
+        <text x="290" y="86" text-anchor="middle">2. cobrar venta (id, terminal)</text>
+        <rect x="372" y="100" width="136" height="34" fill="#fff5f5" stroke="#e31e24"/>
+        <text x="440" y="114" text-anchor="middle">3. valida monto real</text>
+        <text x="440" y="127" text-anchor="middle">+ clave de idempotencia</text>
+        <path d="M365 152 H513" stroke="#009ee3" stroke-width="1.6" marker-end="url(#s2)"/>
+        <text x="440" y="146" text-anchor="middle">4. crear orden (point)</text>
+        <path d="M515 178 H653" stroke="#009ee3" stroke-width="1.6" marker-end="url(#s2)"/>
+        <text x="585" y="172" text-anchor="middle">5. monto a la terminal</text>
+        <rect x="604" y="188" width="102" height="34" fill="#f0f8fd" stroke="#009ee3"/>
+        <text x="655" y="202" text-anchor="middle">6. socio paga</text>
+        <text x="655" y="215" text-anchor="middle">(tarjeta / NIP)</text>
+        <path d="M653 238 H517" stroke="#009ee3" stroke-width="1.6" marker-end="url(#s2)"/>
+        <text x="585" y="232" text-anchor="middle">7. resultado</text>
+        <path d="M515 262 H367" stroke="#009ee3" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#s2)"/>
+        <text x="440" y="256" text-anchor="middle">8. webhook firmado</text>
+        <rect x="300" y="270" width="130" height="34" fill="#fff5f5" stroke="#e31e24"/>
+        <text x="365" y="284" text-anchor="middle">9. valida firma, consulta</text>
+        <text x="365" y="297" text-anchor="middle">orden y registra venta</text>
+        <path d="M365 322 H217" stroke="#1a9c3c" stroke-width="1.6" marker-end="url(#s3)"/>
+        <text x="290" y="316" text-anchor="middle" fill="#1a9c3c">10. estado: APROBADO</text>
+        <path d="M215 342 H72" stroke="#1a9c3c" stroke-width="1.6" marker-end="url(#s3)"/>
+        <text x="142" y="336" text-anchor="middle" fill="#1a9c3c">11. ticket / confirmación</text>
+      </g>
+    </svg>
+
+    <h3>Reglas clave</h3>
+    <ul>
+      <li><strong>El monto lo decide el POS API</strong> a partir de la venta registrada, nunca un valor editable del navegador.</li>
+      <li><strong>Un intento = una orden.</strong> La clave de idempotencia evita doble cobro por doble clic o reintento.</li>
+      <li><strong>El resultado oficial llega por webhook</strong> (validando la firma). La pantalla puede consultar el estado mientras espera, pero no declara “pagado” por su cuenta.</li>
+      <li>Si el navegador se cierra o recarga, el estado se recupera del POS API, no de la memoria de la pantalla.</li>
+    </ul>
+    <div class="footer-note">Elite Gym 24/7 · Pagos con Mercado Pago Point · Integración en el POS</div>
+  </section>
+
+  <!-- 4. ESTADOS -->
+  <section class="page">
+    <h2>4. Estados del cobro</h2>
+    <p>El POS maneja un ciclo de vida claro por cada intento de cobro. Elite solo actúa en <strong>Aprobado</strong> (y en <strong>Reembolsado</strong>, si aplica).</p>
+
+    <svg class="illus" viewBox="0 0 720 230" role="img" aria-label="Diagrama de estados del cobro">
+      <defs>
+        <marker id="e1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5a5a5a"/></marker>
+      </defs>
+      <rect width="720" height="230" fill="#fff"/>
+      <g font-family="Arial" font-size="11" font-weight="700" text-anchor="middle">
+        <rect x="10" y="90" width="100" height="40" rx="20" fill="#f7f4f3" stroke="#5a5a5a"/><text x="60" y="114" fill="#1a1a1a">Creado</text>
+        <rect x="140" y="90" width="120" height="40" rx="20" fill="#f0f8fd" stroke="#009ee3"/><text x="200" y="114" fill="#1a1a1a">En terminal</text>
+        <rect x="290" y="90" width="120" height="40" rx="20" fill="#f0f8fd" stroke="#009ee3"/><text x="350" y="114" fill="#1a1a1a">Procesando</text>
+        <rect x="470" y="14" width="110" height="36" rx="18" fill="#1a9c3c"/><text x="525" y="37" fill="#fff">Aprobado</text>
+        <rect x="470" y="64" width="110" height="36" rx="18" fill="#e31e24"/><text x="525" y="87" fill="#fff">Rechazado</text>
+        <rect x="470" y="114" width="110" height="36" rx="18" fill="#808080"/><text x="525" y="137" fill="#fff">Cancelado</text>
+        <rect x="470" y="164" width="110" height="36" rx="18" fill="#a0a0a0"/><text x="525" y="187" fill="#fff">Expirado</text>
+        <rect x="610" y="14" width="100" height="36" rx="18" fill="#fff" stroke="#e31e24" stroke-width="2"/><text x="660" y="37" fill="#e31e24">Reembolsado</text>
+      </g>
+      <g stroke="#5a5a5a" stroke-width="1.6" fill="none">
+        <path d="M110 110 H138" marker-end="url(#e1)"/>
+        <path d="M260 110 H288" marker-end="url(#e1)"/>
+        <path d="M410 104 L468 34" marker-end="url(#e1)"/>
+        <path d="M410 108 L468 82" marker-end="url(#e1)"/>
+        <path d="M410 114 L468 132" marker-end="url(#e1)"/>
+        <path d="M410 118 L468 180" marker-end="url(#e1)"/>
+        <path d="M580 32 H608" marker-end="url(#e1)"/>
+        <path d="M200 130 Q200 175 468 182" stroke-dasharray="4 3" marker-end="url(#e1)"/>
+      </g>
+      <text x="300" y="214" font-family="Arial" font-size="9.5" fill="#5a5a5a">El socio no paga a tiempo → Expirado (se puede reintentar con una orden nueva)</text>
+    </svg>
+
+    <table>
+      <thead><tr><th>Estado</th><th>Qué ve el cajero</th><th>Qué hace el POS</th><th>Qué hace Elite</th></tr></thead>
+      <tbody>
+        <tr><td>Creado / En terminal</td><td>“Pida al socio que pague en la terminal”</td><td>Orden enviada; espera</td><td>Nada</td></tr>
+        <tr><td>Procesando / acción requerida</td><td>“Procesando…” o indicación de la terminal</td><td>Espera webhook; puede consultar la orden</td><td>Nada</td></tr>
+        <tr><td><strong>Aprobado</strong></td><td>“Pago aprobado” + ticket</td><td>Registra venta pagada, método y cuotas</td><td><strong>Aplica vigencia / entrega</strong></td></tr>
+        <tr><td>Rechazado</td><td>“Pago rechazado, intente otro medio”</td><td>Intento fallido; la venta sigue sin pagar</td><td>Nada</td></tr>
+        <tr><td>Cancelado</td><td>“Cobro cancelado”</td><td>Cierra el intento</td><td>Nada</td></tr>
+        <tr><td>Expirado</td><td>“Tiempo agotado, reintente”</td><td>Cierra el intento; permite uno nuevo</td><td>Nada</td></tr>
+        <tr><td>Reembolsado</td><td>“Pago reembolsado”</td><td>Registra el reembolso en la venta</td><td>Revisa la vigencia según la política del gimnasio</td></tr>
+      </tbody>
+    </table>
+
+    <div class="warn">
+      <strong>Nunca</strong> se marca una membresía como pagada por una pantalla de éxito o por el cajero.
+      Solo cuenta el estado <strong>Aprobado</strong> confirmado por el POS API.
+    </div>
+    <div class="footer-note">Elite Gym 24/7 · Pagos con Mercado Pago Point · Integración en el POS</div>
+  </section>
+
+  <!-- 5. MSI -->
+  <section class="page">
+    <h2>5. Meses sin intereses (MSI)</h2>
+    <p>
+      Con MSI el socio divide el pago en su tarjeta de crédito; <strong>el gimnasio vende una sola vez por el total</strong>.
+      Las opciones de meses las ofrece la terminal según lo configurado en la cuenta de Mercado Pago.
+    </p>
+
+    <svg class="illus" viewBox="0 0 720 210" role="img" aria-label="Flujo de un pago a meses sin intereses">
+      <defs>
+        <marker id="m1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5a5a5a"/></marker>
+      </defs>
+      <rect width="720" height="210" fill="#f7f4f3"/>
+      <g font-family="Arial" text-anchor="middle">
+        <rect x="14" y="30" width="150" height="80" rx="6" fill="#fff" stroke="#1a1a1a"/>
+        <text x="89" y="54" font-size="11" font-weight="700" fill="#1a1a1a">Elite</text>
+        <text x="89" y="74" font-size="10" fill="#5a5a5a">Membresía anual</text>
+        <text x="89" y="94" font-size="12" font-weight="700" fill="#1a1a1a">$ 6,000.00</text>
+
+        <rect x="196" y="30" width="150" height="80" rx="6" fill="#fff" stroke="#e31e24" stroke-width="2"/>
+        <text x="271" y="54" font-size="11" font-weight="700" fill="#e31e24">POS</text>
+        <text x="271" y="74" font-size="10" fill="#5a5a5a">Envía el TOTAL</text>
+        <text x="271" y="92" font-size="10" fill="#5a5a5a">(no calcula cuotas)</text>
+
+        <rect x="378" y="18" width="150" height="104" rx="10" fill="#1a1a1a"/>
+        <rect x="392" y="30" width="122" height="80" rx="4" fill="#2b2b2b"/>
+        <text x="453" y="48" font-size="10" fill="#009ee3" font-weight="700">$ 6,000.00</text>
+        <text x="453" y="66" font-size="9.5" fill="#ccc">Contado</text>
+        <rect x="402" y="72" width="102" height="16" fill="#009ee3"/>
+        <text x="453" y="84" font-size="9.5" fill="#fff" font-weight="700">6 MSI ✓</text>
+        <text x="453" y="102" font-size="9.5" fill="#ccc">12 MSI</text>
+        <text x="453" y="140" font-size="9.5" fill="#5a5a5a">El socio elige en la terminal</text>
+
+        <rect x="560" y="30" width="146" height="80" rx="6" fill="#009ee3"/>
+        <text x="633" y="54" font-size="11" font-weight="700" fill="#fff">Mercado Pago</text>
+        <text x="633" y="74" font-size="10" fill="#e6f6fd">Aprueba el total</text>
+        <text x="633" y="92" font-size="10" fill="#e6f6fd">installments = 6</text>
+      </g>
+      <g stroke="#5a5a5a" stroke-width="1.6" fill="none">
+        <path d="M164 70 H194" marker-end="url(#m1)"/>
+        <path d="M346 70 H376" marker-end="url(#m1)"/>
+        <path d="M528 70 H558" marker-end="url(#m1)"/>
+      </g>
+      <rect x="14" y="160" width="692" height="38" rx="4" fill="#fff" stroke="#1a9c3c"/>
+      <text x="360" y="184" text-anchor="middle" font-family="Arial" font-size="11" fill="#1a1a1a">
+        Resultado: <tspan font-weight="700">1 venta de $6,000 (6 MSI)</tspan> en el POS → Elite da <tspan font-weight="700">12 meses de vigencia</tspan>. No hay 6 renovaciones.
+      </text>
+    </svg>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="mini-title">Reglas de negocio</div>
+        <ul style="margin:0">
+          <li>Los MSI disponibles (3, 6, 12…) se configuran en la cuenta de Mercado Pago <strong>antes</strong> de cobrar; el POS y Elite no los inventan.</li>
+          <li>Un pago a MSI es <strong>una venta por el total</strong>. La vigencia se calcula sobre el plan pagado, no sobre las cuotas.</li>
+          <li>El costo de ofrecer MSI lo define la configuración comercial de Mercado Pago; negocio debe validarlo antes de activar.</li>
+          <li>La disponibilidad depende de la tarjeta del socio y de los montos mínimos que defina Mercado Pago.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="mini-title">Reglas técnicas</div>
+        <ul style="margin:0">
+          <li>El POS envía el total; la elección de meses ocurre en la terminal.</li>
+          <li>El POS API guarda el número de cuotas que reporte la orden aprobada, para reportes y conciliación.</li>
+          <li>El ticket y el reporte de ventas muestran “Terminal MP · 6 MSI”.</li>
+          <li>Elite no necesita saber de cuotas; si se quiere mostrar, lo lee de la venta del POS como dato informativo.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="info">
+      <strong>¿Quién decide qué?</strong> El precio del plan lo decide Elite/POS. La tarjeta y las cuotas las procesa
+      Mercado Pago. La vigencia del socio después del pago la decide Elite.
+    </div>
+    <div class="footer-note">Elite Gym 24/7 · Pagos con Mercado Pago Point · Integración en el POS</div>
+  </section>
+
+  <!-- 6. CONTRATO -->
+  <section class="page">
+    <h2>6. Contrato entre Elite y el POS</h2>
+    <p>
+      Elite usa el POS como hoy, a través de su fachada (<code>PosService</code>). Solo se agrega un método de pago nuevo
+      y un estado de cobro. Todo lo específico de Mercado Pago queda dentro del POS.
+    </p>
+
+    <svg class="illus" viewBox="0 0 720 200" role="img" aria-label="Renovación de membresía usando el POS con terminal">
+      <defs>
+        <marker id="c1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1a1a1a"/></marker>
+        <marker id="c2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1a9c3c"/></marker>
+      </defs>
+      <rect width="720" height="200" fill="#fff"/>
+      <g font-family="Arial" text-anchor="middle">
+        <rect x="14" y="20" width="200" height="160" rx="6" fill="#f7f4f3" stroke="#1a1a1a"/>
+        <text x="114" y="44" font-size="12" font-weight="700" fill="#1a1a1a">Elite · Miembros</text>
+        <text x="114" y="70" font-size="10" fill="#5a5a5a">Renovar membresía</text>
+        <text x="114" y="88" font-size="10" fill="#5a5a5a">Plan anual · $6,000</text>
+        <text x="114" y="106" font-size="10" fill="#5a5a5a">Método: Terminal MP</text>
+        <rect x="34" y="124" width="160" height="40" rx="4" fill="#fff" stroke="#1a9c3c"/>
+        <text x="114" y="142" font-size="10" fill="#1a9c3c" font-weight="700">Si APROBADO →</text>
+        <text x="114" y="156" font-size="10" fill="#1a9c3c">extender vigencia</text>
+
+        <rect x="290" y="20" width="200" height="160" rx="6" fill="#fff5f5" stroke="#e31e24" stroke-width="2"/>
+        <text x="390" y="44" font-size="12" font-weight="700" fill="#e31e24">POS</text>
+        <text x="390" y="70" font-size="10" fill="#5a5a5a">Crea venta de suscripción</text>
+        <text x="390" y="88" font-size="10" fill="#5a5a5a">Cobra en terminal</text>
+        <text x="390" y="106" font-size="10" fill="#5a5a5a">Espera webhook</text>
+        <text x="390" y="124" font-size="10" fill="#5a5a5a">Registra venta + cuotas</text>
+        <text x="390" y="150" font-size="10" font-weight="700" fill="#1a1a1a">Responde estado final</text>
+
+        <rect x="566" y="60" width="140" height="80" rx="8" fill="#009ee3"/>
+        <text x="636" y="96" font-size="11" font-weight="700" fill="#fff">Mercado Pago</text>
+        <text x="636" y="114" font-size="10" fill="#e6f6fd">+ Terminal Point</text>
+      </g>
+      <path d="M214 80 H288" stroke="#1a1a1a" stroke-width="1.8" marker-end="url(#c1)"/>
+      <text x="251" y="72" text-anchor="middle" font-family="Arial" font-size="9" fill="#1a1a1a">checkout</text>
+      <path d="M288 140 H216" stroke="#1a9c3c" stroke-width="1.8" marker-end="url(#c2)"/>
+      <text x="251" y="156" text-anchor="middle" font-family="Arial" font-size="9" fill="#1a9c3c">estado</text>
+      <path d="M490 100 H564" stroke="#009ee3" stroke-width="1.8"/>
+      <path d="M564 100 H490" stroke="#009ee3" stroke-width="1.8" stroke-dasharray="4 3"/>
+    </svg>
+
+    <h3>Lo que Elite envía y recibe (conceptual)</h3>
+    <table>
+      <thead><tr><th>Elite envía al POS</th><th>Elite recibe del POS</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>
+            <code>memberId</code>, <code>memberName</code>, <code>amount</code> (precio del plan),
+            <code>concept</code> (MEMBERSHIP / RENEWAL), <code>periodKey</code>,
+            <code>paymentMethod: "TERMINAL_MP"</code>, <code>payerId</code>
+          </td>
+          <td>
+            <code>saleId</code>, <code>paymentStatus</code> (APPROVED / REJECTED / CANCELED / EXPIRED / REFUNDED),
+            y como dato informativo <code>installments</code> y el método final
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Endpoints nuevos dentro del POS API (conceptuales)</h3>
+    <table>
+      <thead><tr><th>Endpoint</th><th>Para qué</th><th>Quién lo usa</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET /api/v1/payment-terminals</code></td><td>Terminales disponibles para la caja</td><td>Módulo POS</td></tr>
+        <tr><td><code>POST /api/v1/sales/{saleId}/point-order</code></td><td>Iniciar el cobro en la terminal</td><td>Módulo POS</td></tr>
+        <tr><td><code>GET /api/v1/sales/{saleId}/payment-status</code></td><td>Consultar el estado mientras se espera</td><td>Módulo POS / PosService</td></tr>
+        <tr><td><code>POST /api/v1/webhooks/mercadopago</code></td><td>Recibir el resultado firmado</td><td>Mercado Pago</td></tr>
+      </tbody>
+    </table>
+    <p class="muted">Los nombres son una propuesta; deben seguir las convenciones existentes del POS API (envelope Tanosi, API key, rutas <code>/api/v1</code>).</p>
+    <div class="footer-note">Elite Gym 24/7 · Pagos con Mercado Pago Point · Integración en el POS</div>
+  </section>
+
+  <!-- 7. SEGURIDAD Y OPERACIÓN -->
+  <section class="page">
+    <h2>7. Seguridad y operación</h2>
+    <div class="two-col">
+      <div class="card">
+        <div class="mini-title">Seguridad</div>
+        <ul style="margin:0">
+          <li>Access Token y secreto del webhook <strong>solo</strong> en el servidor del POS (variables de entorno), nunca en React, en el repositorio ni en logs.</li>
+          <li>Validar la firma (<code>x-signature</code>) de cada webhook.</li>
+          <li>Webhooks idempotentes: el mismo evento dos veces no duplica la venta.</li>
+          <li>No guardar datos de tarjeta (número, CVV); solo identificadores de la orden.</li>
+          <li>Relación trazable: venta ↔ orden MP ↔ terminal ↔ caja.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="mini-title">Operación en recepción</div>
+        <ul style="margin:0">
+          <li>La terminal opera en <strong>modo PDV</strong> (recibe órdenes del POS).</li>
+          <li>El cajero nunca teclea el monto en la terminal.</li>
+          <li>Si la terminal no responde: el cobro queda sin pagar y se puede reintentar o usar otro método.</li>
+          <li>Efectivo y transferencia siguen funcionando igual.</li>
+          <li>Reembolsos: se hacen desde el POS / Mercado Pago, y el POS lo registra en la venta.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Prerrequisitos</h3>
+    <table>
+      <thead><tr><th>Qué</th><th>Responsable</th><th>Listo cuando</th></tr></thead>
+      <tbody>
+        <tr><td>Cuenta Mercado Pago del negocio y aplicación en “Tus integraciones”</td><td>Negocio / Dev</td><td>Credenciales de prueba y de producción</td></tr>
+        <tr><td>Terminal Point asociada a la cuenta y en modo PDV</td><td>Negocio / Dev</td><td>terminal_id identificado y ligado a la caja</td></tr>
+        <tr><td>MSI configurados en la cuenta</td><td>Negocio</td><td>Meses y costos aprobados</td></tr>
+        <tr><td>POS API accesible por HTTPS público</td><td>Backend / DevOps</td><td>Recibe webhooks firmados</td></tr>
+        <tr><td>Tablas para órdenes y estados del cobro</td><td>Backend</td><td>Venta, orden, estado y cuotas persistidos</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Pruebas mínimas</h3>
+    <table>
+      <thead><tr><th>Escenario</th><th>Resultado esperado</th></tr></thead>
+      <tbody>
+        <tr><td>Pago de contado aprobado</td><td>1 venta pagada; Elite extiende vigencia una vez</td></tr>
+        <tr><td>Pago a 6 MSI aprobado</td><td>1 venta por el total con 6 cuotas registradas; vigencia completa del plan</td></tr>
+        <tr><td>Tarjeta rechazada</td><td>Venta sin pagar; se puede reintentar; Elite no cambia</td></tr>
+        <tr><td>Doble clic en “Cobrar”</td><td>Una sola orden</td></tr>
+        <tr><td>Webhook duplicado o tardío</td><td>Sin duplicados; la pantalla muestra “Procesando” y se actualiza</td></tr>
+        <tr><td>Terminal apagada / sin red</td><td>Error claro y recuperable; nada marcado como pagado</td></tr>
+        <tr><td>Socio no paga a tiempo</td><td>Expirado; permite un nuevo intento</td></tr>
+        <tr><td>Recargar el navegador a mitad del cobro</td><td>El estado se recupera del POS API</td></tr>
+        <tr><td>Reembolso</td><td>Venta marcada como reembolsada; Elite revisa la vigencia</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 8. RESULTADO ESPERADO -->
+  <section class="page">
+    <h2>8. Resultado esperado — objetivos cortos</h2>
+    <p class="muted">Cada objetivo es pequeño, verificable y se puede entregar por separado.</p>
+
+    <div class="goal"><div class="id">O1</div><div><strong>Terminal lista</strong>Terminal Point asociada a la cuenta, en modo PDV y ligada a la caja del POS.</div></div>
+    <div class="goal"><div class="id">O2</div><div><strong>Cobro de contado desde el POS</strong>El cajero elige “Terminal Mercado Pago”, el monto llega solo a la terminal y el socio paga.</div></div>
+    <div class="goal"><div class="id">O3</div><div><strong>Resultado confiable</strong>El estado final llega por webhook firmado; no hay doble cobro ni ventas duplicadas.</div></div>
+    <div class="goal"><div class="id">O4</div><div><strong>MSI funcionando</strong>La terminal ofrece los meses configurados; el POS registra una venta por el total con su número de cuotas.</div></div>
+    <div class="goal"><div class="id">O5</div><div><strong>Renovaciones desde Elite</strong>Elite renueva con “Terminal MP” vía <code>PosService</code> y solo extiende la vigencia cuando el POS confirma Aprobado.</div></div>
+    <div class="goal"><div class="id">O6</div><div><strong>Elite sin Mercado Pago</strong>Ni el código ni la configuración de Elite contienen credenciales, endpoints o lógica de Mercado Pago.</div></div>
+    <div class="goal"><div class="id">O7</div><div><strong>Reportes y conciliación</strong>Las ventas con terminal (contado y MSI) aparecen en Reportes con su método y cuotas, conciliables con Mercado Pago.</div></div>
+    <div class="goal"><div class="id">O8</div><div><strong>Fallos controlados</strong>Rechazo, cancelación, expiración y terminal desconectada dejan todo consistente y con mensajes claros.</div></div>
+
+    <h3>Fuera de alcance</h3>
+    <ul>
+      <li>Cobros recurrentes automáticos (domiciliación): la terminal es para pagos presenciales.</li>
+      <li>Cambios en la lógica del gimnasio (planes, vigencia, acceso) más allá de reaccionar al estado del cobro.</li>
+      <li>Integrar Mercado Pago en el Access Gateway o en cualquier otro componente fuera del POS.</li>
+    </ul>
+
+    <h3>Referencias oficiales</h3>
+    <ul class="muted" style="font-size:9pt">
+      <li>Point · Overview: mercadopago.com.mx/developers/es/docs/mp-point/overview</li>
+      <li>Procesamiento de pagos Point: mercadopago.com.mx/developers/es/docs/mp-point/payment-processing</li>
+      <li>Crear order (Orders API): mercadopago.com.mx/developers/es/reference/in-person-payments/point/orders/create-order/post</li>
+      <li>Webhooks Point: mercadopago.com.mx/developers/es/docs/mp-point/notifications</li>
+      <li>Pruebas de integración: mercadopago.com.mx/developers/es/docs/mp-point/integration-test</li>
+    </ul>
+    <p class="muted" style="font-size:9pt">Revisar las referencias antes de pasar a producción, especialmente estados, MSI, costos y requisitos de la terminal.</p>
+    <div class="footer-note">Elite Gym 24/7 · Pagos con Mercado Pago Point · Integración en el POS</div>
+  </section>
+
+</body>
+</html>

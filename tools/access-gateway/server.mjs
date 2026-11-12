@@ -36,7 +36,11 @@ import {
   pushActivity,
   startedAtIso,
   pendingEnrolls,
+  renameTerminal,
+  removeTerminal,
+  summarizeAdmsTrace,
 } from "./store.mjs";
+import { CAPTURES_DIR, listPhotos, photosCount, readPhoto } from "./captures.mjs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
@@ -132,6 +136,24 @@ async function buildDiagnostics({ includeNetstat = false, source = "poll" } = {}
   };
 }
 
+function traceHint(byHandled) {
+  const n = (k) => byHandled[k] || 0;
+  const accesses = n("attlog") + n("rtlog") + n("attlog-inferred");
+  const photos = n("attphoto");
+  const polling = n("ping") + n("getrequest-info") + n("getrequest-cmds") + n("push-config");
+  if (n("attphoto-unparsed")) {
+    return "Llegaron fotos con un formato que no se pudo leer. Hay copias en captures/raw para analizarlas.";
+  }
+  if (accesses && !photos) {
+    return "Llegan accesos pero no fotos: active en el lector la captura de foto de asistencia (tomar y guardar).";
+  }
+  if (accesses) return "";
+  if (n("registry") >= 3 && !polling) {
+    return "El lector repite el registro y no avanza. Reinicie el lector para que tome la nueva respuesta del Gateway.";
+  }
+  return "El lector está conectado pero aún no manda accesos. Pase un socio enrolado y revise de nuevo.";
+}
+
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -139,6 +161,8 @@ function cors(res) {
     "Access-Control-Allow-Headers",
     "Content-Type, Accept, Authorization, X-Request-Id",
   );
+  // Chrome/Edge: un sitio HTTPS público llamando a 127.0.0.1 exige este header en el preflight.
+  res.setHeader("Access-Control-Allow-Private-Network", "true");
 }
 
 function sendJson(res, status, body) {
@@ -364,13 +388,87 @@ const eliteServer = http.createServer(async (req, res) => {
       devicesOnline: terminals.filter((t) => t.online).length,
       eventsCount: events.length,
       activityCount: activityLog.length,
+      photosCount: photosCount(),
+      capturesDir: CAPTURES_DIR,
       startedAtIso,
       note: "ADMS real. SpeedFace Cloud Server → este PC.",
     });
   }
 
+  if (req.method === "GET" && url.pathname === "/v1/adms/photos") {
+    const limit = Math.min(48, Number(url.searchParams.get("limit") || 12));
+    const withImage = url.searchParams.get("images") !== "0";
+    const terminalBySerial = new Map(
+      listTerminalStatus().map((t) => [t.serial, t]),
+    );
+    const photos = listPhotos(limit).map((p) => {
+      const t = terminalBySerial.get(p.serial);
+      const jpeg = withImage ? readPhoto(p.id) : null;
+      return {
+        ...p,
+        terminalId: t?.terminalId,
+        terminalLabel: t?.label,
+        dataUrl: jpeg ? `data:image/jpeg;base64,${jpeg.toString("base64")}` : undefined,
+      };
+    });
+    return sendJson(res, 200, {
+      ok: true,
+      total: photosCount(),
+      capturesDir: CAPTURES_DIR,
+      photos,
+    });
+  }
+
+  const photoMatch = /^\/v1\/adms\/photos\/([A-Za-z0-9_-]+)(?:\.jpg)?$/.exec(url.pathname);
+  if (req.method === "GET" && photoMatch) {
+    const jpeg = readPhoto(photoMatch[1]);
+    if (!jpeg) {
+      return sendJson(res, 404, { ok: false, code: "NOT_FOUND", message: "Foto no encontrada" });
+    }
+    cors(res);
+    res.writeHead(200, {
+      "Content-Type": "image/jpeg",
+      "Content-Length": jpeg.length,
+      "Cache-Control": "private, max-age=3600",
+    });
+    return res.end(jpeg);
+  }
+
   if (req.method === "GET" && url.pathname === "/v1/terminals") {
     return sendJson(res, 200, listTerminalStatus());
+  }
+
+  if (
+    req.method === "POST" &&
+    (url.pathname === "/v1/terminals/rename" || url.pathname === "/v1/terminals/remove")
+  ) {
+    let body;
+    try {
+      body = (await readBody(req)) || {};
+    } catch {
+      return sendJson(res, 400, { ok: false, code: "INVALID_REQUEST", message: "JSON inválido" });
+    }
+    const terminalId = String(body.terminalId || "").trim();
+    const result =
+      url.pathname === "/v1/terminals/rename"
+        ? renameTerminal(terminalId, body.label)
+        : removeTerminal(terminalId);
+    if (!result.ok) {
+      const messages = {
+        TERMINAL_NOT_FOUND: "Ese lector ya no existe.",
+        INVALID_LABEL: "Escriba un nombre para el lector.",
+        TERMINAL_ONLINE: "No se puede quitar un lector conectado.",
+      };
+      const status = result.code === "TERMINAL_NOT_FOUND" ? 404 : 400;
+      return sendJson(res, status, { ...result, message: messages[result.code] ?? result.code });
+    }
+    pushActivity(
+      url.pathname === "/v1/terminals/rename"
+        ? `Lector ${terminalId} renombrado a "${result.label}"`
+        : `Lector ${terminalId} quitado de la lista`,
+      { kind: "terminal-config" },
+    );
+    return sendJson(res, 200, { ...result, terminals: listTerminalStatus() });
   }
 
   if (req.method === "GET" && url.pathname === "/v1/activity") {
@@ -378,6 +476,39 @@ const eliteServer = http.createServer(async (req, res) => {
     return sendJson(res, 200, {
       ok: true,
       activity: activityLog.slice(0, limit),
+    });
+  }
+
+  if (req.method === "GET" && url.pathname === "/v1/adms/trace") {
+    const limit = Math.min(200, Number(url.searchParams.get("limit") || 80));
+    const hideNoise = url.searchParams.get("noise") === "0";
+    const only = (url.searchParams.get("only") || "").trim().toLowerCase();
+    const summary = summarizeAdmsTrace(limit);
+    let entries = summary.entries;
+    if (hideNoise) entries = entries.filter((e) => !e.noise);
+    if (only === "data") {
+      entries = entries.filter((e) =>
+        /attlog|attphoto|devicecmd|operlog|biodata|face|userinfo|enroll/i.test(
+          String(e.handledAs || e.table || ""),
+        ),
+      );
+    } else if (only === "photo") {
+      entries = entries.filter(
+        (e) =>
+          e.jpeg ||
+          e.photoAttached ||
+          /attphoto/i.test(String(e.handledAs || e.table || "")),
+      );
+    }
+    return sendJson(res, 200, {
+      ok: true,
+      total: summary.total,
+      withJpeg: summary.withJpeg,
+      withPhoto: summary.withPhoto,
+      byHandled: summary.byHandled,
+      byTable: summary.byTable,
+      trace: entries,
+      hint: traceHint(summary.byHandled),
     });
   }
 
@@ -527,7 +658,11 @@ eliteServer.listen(ELITE_PORT, HOST, () => {
   console.log(`Elite API  http://${HOST}:${ELITE_PORT}`);
   console.log(`  GET  /health`);
   console.log(`  GET  /v1/terminals`);
+  console.log(`  POST /v1/terminals/rename  { terminalId, label }`);
+  console.log(`  POST /v1/terminals/remove  { terminalId }  (solo desconectados)`);
   console.log(`  GET  /v1/activity`);
+  console.log(`  GET  /v1/adms/trace`);
+  console.log(`  GET  /v1/adms/photos       (fotos en ${CAPTURES_DIR})`);
   console.log(`  GET  /v1/diagnostics`);
   console.log(`  POST /v1/diagnostics/run`);
   console.log(`  POST /v1/reconnect`);
@@ -538,9 +673,9 @@ eliteServer.listen(ELITE_PORT, HOST, () => {
 
 admsServer.listen(ADMS_PORT, HOST, () => {
   console.log(`ADMS PUSH  http://${HOST}:${ADMS_PORT}/iclock/...`);
-  console.log(`  Terminales:`);
+  console.log(`  Lectores conocidos (los nuevos se detectan solos al conectarse):`);
   for (const [id, t] of Object.entries(TERMINALS)) {
-    console.log(`    ${id} → SN ${t.serial}`);
+    console.log(`    ${id} → SN ${t.serial} (${t.label})`);
   }
   console.log(``);
   console.log(`MODO: ADMS directo + Elite`);
