@@ -173,7 +173,7 @@ export default function Layout() {
             <Cpu size={18} />
             <div className="flex flex-col min-w-0">
               <span className="font-bold text-xs tracking-wide uppercase">
-                Panel
+                Configuración
               </span>
               <span
                 className={`text-[9px] font-bold uppercase tracking-wide flex items-center gap-1 ${statusClass}`}

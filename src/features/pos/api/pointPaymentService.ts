@@ -14,6 +14,7 @@ export type PaymentStatus =
   | 'REFUNDED'
   | 'VOIDED';
 
+
 export interface CreateOrderParams {
   saleId: string;
   amount?: number; // Opcional, ya que el backend lo lee directamente de la venta en base de datos
