@@ -27,6 +27,7 @@ import {
   Download,
   FileText,
   ExternalLink,
+  CreditCard,
 } from "lucide-react";
 import { getSessionPayer } from "../core/auth/authStorage";
 import {
@@ -38,13 +39,15 @@ import { useAuth } from "../context/AuthContext";
 import { useAccessGatewayStatus } from "../context/AccessGatewayStatusContext";
 import { addMembershipPayment } from "../lib/demoStore";
 import { getGymPosService } from "../config/gymPosService";
+import { DirectDebitManageModal } from "@/features/pos/ui/DirectDebitManageModal";
 import {
   PosTicketModal,
-  CheckoutModal, // NUEVO
-  PosApiError, // NUEVO
+  CheckoutModal, // N
+  DirectDebitModal, // N
+  PosApiError, // N
   DEFAULT_LABELS,
   buildSubscriptionReceipt,
-  type PosSale, // NUEVO
+  type PosSale, // N
   type PosTicketReceipt,
   type SubscriptionConcept,
 } from "@/features/pos";
@@ -606,6 +609,13 @@ function addPeriodToDate(
   return d.toISOString().slice(0, 10);
 }
 
+/** Día anterior: el alta con tarjeta nace vencida hasta que se aprueba el pago. */
+function dayBeforeIso(iso: string): string {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Fecha desde la que se extiende la vigencia al renovar. */
 function renewalBaseDate(member: Pick<Member, "renewalDate">): string {
   const today = new Date().toISOString().slice(0, 10);
@@ -757,6 +767,37 @@ export default function Members() {
   }, [readerOptions, newMemberForm.faceIdTerminal]);
   const [step1Errors, setStep1Errors] = useState<AddMemberStep1Errors>({});
   const [showPurchaseConfirmModal, setShowPurchaseConfirmModal] = useState(false);
+
+  /** N: alta esperando el pago en la terminal */
+  const [wizardCheckout, setWizardCheckout] = useState<{
+    saleId: string;
+    row: Member;
+    receipt: PosTicketReceipt | null;
+    posTotal: number;
+  } | null>(null);
+  /** N: alta ya cobrada a la que le falta activar la vigencia */
+  const [wizardApplyPending, setWizardApplyPending] = useState<{
+    row: Member;
+    saleId: string | null;
+    posTotal: number;
+  } | null>(null);
+
+  /** N: domiciliación esperando que el socio capture su tarjeta */
+  const [directDebitCheckout, setDirectDebitCheckout] = useState<{
+    member: Member;
+    amount: number;
+    months: number;
+    periodKey: string | null;
+    priceBranchFrequencyID: number;
+    onAuthorized: () => void;
+  } | null>(null);
+
+  // N: socio cuyo domiciliado se está administrando
+  const [manageDebitFor, setManageDebitFor] = useState<{
+    memberId: string;
+    memberName: string;
+    email?: string;
+  } | null>(null);
 
   const directPayOptions = useMemo(
     () =>
@@ -1499,9 +1540,17 @@ export default function Members() {
       debitMonths,
     };
 
-    // Domiciliado: hoy no se cobra en el POS
+    // CAMBIO: domiciliado → autorizar tarjeta en Mercado Pago; se activa solo el primer mes
     if (isDirectDebit) {
-      await applyRenewal(plan);
+      const firstMonth = addPeriodToDate(renewalBaseDate(member), { months: 1 });
+      setDirectDebitCheckout({
+        member,
+        amount,
+        months: debitMonths,
+        periodKey: paymentForm.periodKey,
+        priceBranchFrequencyID: paymentForm.priceBranchFrequencyID,
+        onAuthorized: () => void applyRenewal({ ...plan, newRenewalDate: firstMonth }),
+      });
       return;
     }
 
@@ -1568,7 +1617,14 @@ export default function Members() {
     });
   };
 
-  const closeAddMemberModal = () => {
+    const closeAddMemberModal = () => {
+    if (wizardApplyPending) {
+      toast.warning("El alta quedó cobrada pero sin vigencia", {
+        description:
+          "Al renovar a este miembro aparecerá como \"pagada sin aplicar\": acepta para activarla sin volver a cobrar.",
+        duration: 15_000,
+      });
+    }
     setShowAddMemberModal(false);
     setAddMemberStep(1);
     setCreatedMemberSummary(null);
@@ -1580,6 +1636,8 @@ export default function Members() {
     setBranchPricesLoading(false);
     setStep1Errors({});
     setShowPurchaseConfirmModal(false);
+    setWizardCheckout(null);
+    setWizardApplyPending(null);
     setNewMemberForm(emptyNewMemberForm());
   };
 
@@ -1785,6 +1843,24 @@ export default function Members() {
     };
   };
 
+    /** N: cuánto y cómo se cobra hoy en el POS */
+  const wizardCharge = (f: ReturnType<typeof buildClientFieldsFromForm>) => {
+    const posTotal =
+      (newMemberForm.chargeSubscriptionFee ? f.subscriptionFeeAmount : 0) +
+      (newMemberForm.directDebit ? 0 : f.membershipAmount);
+    const method: "CASH" | "CARD" | "QR" = newMemberForm.directDebit
+      ? "CARD"
+      : newMemberForm.paymentMethod;
+    const payWithTerminal = posTotal > 0 && method === "CARD";
+    return {
+      posTotal,
+      method,
+      payWithTerminal,
+      // Nace vencido si paga con terminal o si es domiciliado
+      needsGate: payWithTerminal || newMemberForm.directDebit,
+    };
+  };
+
   /**
    * Etapa 1 del cobro: alta del cliente en catálogo.
    * Devuelve el miembro creado, o null si falló (no se intenta el cobro).
@@ -1810,7 +1886,10 @@ export default function Members() {
         fullAddress: f.addressTrim || undefined,
         planID: DEFAULT_MEMBER_PLAN_ID,
         enrollmentDate: newMemberForm.enrollmentDate,
-        renewalDate: newMemberForm.renewalDate,
+        // CAMBIO: con tarjeta nace vencido; la vigencia se aplica al aprobar
+        renewalDate: wizardCharge(f).needsGate
+          ? dayBeforeIso(newMemberForm.enrollmentDate)
+          : newMemberForm.renewalDate,
         idDocumentDataUrl: newMemberForm.idDocumentDataUrl,
         isDirectDebit: newMemberForm.directDebit,
         priceRegular: newMemberForm.directDebit ? 0 : f.membershipAmount,
@@ -1885,41 +1964,69 @@ export default function Members() {
   };
 
   /**
-   * Etapa 2 del cobro: solo el pago en POS (sin respaldo local, para
-   * poder reintentarlo). Devuelve true si el cobro quedó registrado.
+   * NUEVO: etapa 3, activar la vigencia real (solo con el pago aprobado)
+   * y avisar al POS. Reintenable sin volver a cobrar.
    */
-  const runWizardPayment = async (
+  const finishWizardPayment = async (
     row: Member,
     f: ReturnType<typeof buildClientFieldsFromForm>,
+    saleId: string | null,
+    posTotal: number,
   ): Promise<boolean> => {
-    const posTotal =
-      (newMemberForm.chargeSubscriptionFee ? f.subscriptionFeeAmount : 0) +
-      (newMemberForm.directDebit ? 0 : f.membershipAmount);
-
     setWizardSync("payment");
-    try {
-      if (posTotal > 0) {
-        const { receipt } = await registerSubscriptionPayment({
-          memberId: row.id,
-          memberName: f.fullName,
-          amount: posTotal,
-          concept: "MEMBERSHIP",
-          method: newMemberForm.directDebit
-            ? "CARD"
-            : newMemberForm.paymentMethod,
-          periodKey: newMemberForm.selectedPeriodKey,
-          localFallback: false,
+        try {
+      // Domiciliado: solo el primer mes; los siguientes llegan con cada cobro
+      const targetRenewal = newMemberForm.directDebit
+        ? addPeriodToDate(newMemberForm.enrollmentDate, { months: 1 })
+        : newMemberForm.renewalDate;
+
+      let member = row;
+      if (row.renewalDate !== targetRenewal) {
+        const clientId = clientIdFromMemberId(row.id);
+        if (!clientId) throw new Error("El miembro no tiene ID de catálogo.");
+        const res = await updateClientUseCase({
+          clientID: clientId,
+          firstName: f.firstName,
+          lastName: f.lastName,
+          email: f.emailNorm,
+          phoneNumber: f.phoneForApi,
+          phoneCodeNumber: f.dial,
+          fullAddress: f.addressTrim || undefined,
+          planID: DEFAULT_MEMBER_PLAN_ID,
+          enrollmentDate: newMemberForm.enrollmentDate,
+          renewalDate: targetRenewal,
+          idDocumentDataUrl: newMemberForm.idDocumentDataUrl,
+          isDirectDebit: newMemberForm.directDebit,
+          priceRegular: newMemberForm.directDebit ? 0 : f.membershipAmount,
+          priceDirectDebit: newMemberForm.directDebit ? f.membershipAmount : 0,
+          priceBranchFrequencyID: newMemberForm.priceBranchFrequencyID,
         });
-        setSubscriptionTicketReceipt(receipt);
+        if (!res.ok) throw new Error(res.message || "El catálogo no respondió.");
+        member = {
+          ...row,
+          ...res.member,
+          phone: row.phone,
+          emergencyPhone: row.emergencyPhone,
+          idDocumentDataUrl: row.idDocumentDataUrl,
+          renewalDate: targetRenewal,
+        };
+        setWizardMember(member);
+        setMembers((prev) => {
+          const next = prev.map((m) => (m.id === row.id ? member : m));
+          saveMembers(next);
+          return next;
+        });
       }
 
+      if (saleId) await markRenewalApplied(saleId);
+
+      setWizardApplyPending(null);
       setWizardPaymentDone(true);
       setCreatedMemberSummary({
-        id: row.id,
+        id: member.id,
         name: f.fullName,
-        faceIdEnrolled: Boolean(row.faceIdEnrolled),
-        subscriptionPaid:
-          posTotal > 0 && newMemberForm.chargeSubscriptionFee,
+        faceIdEnrolled: Boolean(member.faceIdEnrolled),
+        subscriptionPaid: posTotal > 0 && newMemberForm.chargeSubscriptionFee,
         subscriptionFee: newMemberForm.chargeSubscriptionFee
           ? f.subscriptionFeeAmount
           : 0,
@@ -1932,12 +2039,15 @@ export default function Members() {
             ? `${f.fullName} · Total $${posTotal.toFixed(2)}`
             : `${f.fullName} · Sin cobro POS en esta alta`,
       });
+      setShowPurchaseConfirmModal(false);
+      setAddMemberStep(3);
       return true;
     } catch (error) {
-      toast.error("El alta se completó, pero falló el cobro", {
+      setWizardApplyPending({ row, saleId, posTotal });
+      toast.error("Pago recibido; falta activar la membresía", {
         description: `${
-          error instanceof Error ? error.message : "Error inesperado en el POS."
-        } Reintenta solo el cobro; el miembro no se duplicará.`,
+          error instanceof Error ? error.message : "Error inesperado."
+        } Pulsa "Reintentar activación": no se cobrará de nuevo.`,
         duration: 12_000,
       });
       return false;
@@ -1946,10 +2056,103 @@ export default function Members() {
     }
   };
 
+  /** N: con domiciliado, autorizar la tarjeta antes de activar la vigencia */
+  const afterWizardFeePaid = async (
+    row: Member,
+    f: ReturnType<typeof buildClientFieldsFromForm>,
+    saleId: string | null,
+    posTotal: number,
+  ) => {
+    if (!newMemberForm.directDebit) {
+      await finishWizardPayment(row, f, saleId, posTotal);
+      return;
+    }
+    const opt = findPeriodOption(directDebitOptions, newMemberForm.selectedPeriodKey);
+    setDirectDebitCheckout({
+      member: row,
+      amount: f.membershipAmount,
+      months: opt?.months ?? (newMemberForm.selectedPeriodKey === "12m" ? 12 : 6),
+      periodKey: newMemberForm.selectedPeriodKey,
+      priceBranchFrequencyID: newMemberForm.priceBranchFrequencyID,
+      onAuthorized: () => void finishWizardPayment(row, f, saleId, posTotal),
+    });
+  };
+
   /**
-   * Paso 2: alta + cobro como etapas separadas y reintenables.
-   * Si falla el alta, no se cobra. Si falla solo el cobro,
-   * el reintento salta el alta y solo repite el pago.
+   * CAMBIO: etapa 2, cobro en POS. Con tarjeta abre la terminal y la
+   * vigencia se activa solo al aprobar (finishWizardPayment).
+   */
+  const runWizardPayment = async (
+    row: Member,
+    f: ReturnType<typeof buildClientFieldsFromForm>,
+  ): Promise<void> => {
+    const { posTotal, method } = wizardCharge(f);
+
+    if (posTotal <= 0) {
+      await finishWizardPayment(row, f, null, 0);
+      return;
+    }
+
+    setWizardSync("payment");
+    let result: Awaited<ReturnType<typeof registerSubscriptionPayment>>;
+    try {
+      result = await registerSubscriptionPayment({
+        memberId: row.id,
+        memberName: f.fullName,
+        amount: posTotal,
+        concept: "MEMBERSHIP",
+        method,
+        periodKey: newMemberForm.selectedPeriodKey,
+        localFallback: false,
+      });
+    } catch (error) {
+      setWizardSync(null);
+      // Reintento: ya hay un cobro abierto para este miembro
+      if (
+        error instanceof PosApiError &&
+        error.statusCode === 409 &&
+        (error.errorNumber === 24 || error.errorNumber === 25)
+      ) {
+        const info = (error.data ?? {}) as { saleId?: string; amount?: number };
+        if (info.saleId) {
+          const amount = Number(info.amount ?? posTotal);
+          if (error.errorNumber === 25) {
+            toast.info("Se retoma el cobro pendiente", {
+              description: `Venta ${info.saleId} · $${formatMxnAmount(amount)}`,
+            });
+            setWizardCheckout({ saleId: info.saleId, row, receipt: null, posTotal: amount });
+            return;
+          }
+          // 24: ya pagado, solo falta activar
+          await finishWizardPayment(row, f, info.saleId, amount);
+          return;
+        }
+      }
+      toast.error("El alta se completó, pero falló el cobro", {
+        description: `${
+          error instanceof Error ? error.message : "Error inesperado en el POS."
+        } Reintenta solo el cobro; el miembro no se duplicará.`,
+        duration: 12_000,
+      });
+      return;
+    }
+    setWizardSync(null);
+
+    const serverSale = result.sale?.paymentStatus ? result.sale : null;
+
+    // Tarjeta: cobrar en la terminal; la vigencia se activa al aprobar
+    if (serverSale?.paymentStatus === "PENDING") {
+      setWizardCheckout({ saleId: serverSale.id, row, receipt: result.receipt, posTotal });
+      return;
+    }
+
+    // Efectivo / QR: ya pagado
+    setSubscriptionTicketReceipt(result.receipt);
+    await finishWizardPayment(row, f, serverSale?.id ?? null, posTotal);
+  };
+
+  /**
+   * Paso 2: alta → cobro → activación, cada etapa reintenable.
    */
   const confirmPurchaseAndContinue = async () => {
     if (!validateAddMemberStep2()) return;
@@ -1961,14 +2164,21 @@ export default function Members() {
 
     const f = buildClientFieldsFromForm();
 
+    // Ya cobrado: solo reintentar la activación
+    if (wizardApplyPending) {
+      await finishWizardPayment(
+        wizardApplyPending.row,
+        f,
+        wizardApplyPending.saleId,
+        wizardApplyPending.posTotal,
+      );
+      return;
+    }
+
     const row = await runWizardClientRegistration(f);
     if (!row) return;
 
-    const paid = await runWizardPayment(row, f);
-    if (!paid) return;
-
-    setShowPurchaseConfirmModal(false);
-    setAddMemberStep(3);
+    await runWizardPayment(row, f);
   };
 
   /** Paso 3: Face ID (opcional) → Gateway + persist faceID en Catálogo. */
@@ -2419,6 +2629,23 @@ export default function Members() {
                         <ShoppingCart size={14} />
                         Vender en tienda
                       </button>
+                      {/* N: administrar domiciliado (solo si el socio lo tiene) */}
+                      {member.isDirectDebit ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setManageDebitFor({
+                              memberId: member.id,
+                              memberName: memberFullName(member),
+                              email: member.email,
+                            })
+                          }
+                          className="inline-flex items-center justify-center gap-2 bg-[#0e0e0e] border border-[rgba(93,63,60,0.25)] text-[#e5e2e1] px-4 py-2.5 text-[10px] font-bold tracking-[1px] uppercase hover:border-[#e31e24] transition-colors"
+                        >
+                          <CreditCard size={14} />
+                          Domiciliado
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() =>
@@ -4450,7 +4677,11 @@ export default function Members() {
                 {wizardSync ? (
                   <Loader2 className="animate-spin" size={16} />
                 ) : null}
-                {wizardMember ? "Reintentar cobro" : "Confirmar pago"}
+                {wizardApplyPending
+                  ? "Reintentar activación"
+                  : wizardMember
+                    ? "Reintentar cobro"
+                    : "Confirmar pago"}
               </button>
             </div>
           </div>
@@ -4519,8 +4750,67 @@ export default function Members() {
           </div>
         </div>
       )}
+
+
+          {/* N: autorizar la tarjeta del domiciliado */}
+      {directDebitCheckout && (
+        <DirectDebitModal
+          memberId={directDebitCheckout.member.id}
+          memberName={memberFullName(directDebitCheckout.member)}
+          defaultEmail={directDebitCheckout.member.email}
+          amount={directDebitCheckout.amount}
+          months={directDebitCheckout.months}
+          periodKey={directDebitCheckout.periodKey}
+          priceBranchFrequencyId={directDebitCheckout.priceBranchFrequencyID}
+          onClose={() => {
+            setDirectDebitCheckout(null);
+            toast.info("Domiciliación sin autorizar", {
+              description: "La vigencia no cambió. Puedes intentarlo de nuevo cuando el socio tenga su tarjeta.",
+            });
+          }}
+          onSuccess={() => {
+            const pending = directDebitCheckout;
+            setDirectDebitCheckout(null);
+            pending.onAuthorized();
+          }}
+        />
+      )}
+
+      {/* N: administrar domiciliado (cambiar tarjeta / cancelar) */}
+      {manageDebitFor && (
+        <DirectDebitManageModal
+          memberId={manageDebitFor.memberId}
+          memberName={manageDebitFor.memberName}
+          defaultEmail={manageDebitFor.email}
+          onClose={() => setManageDebitFor(null)}
+        />
+      )}
+
+          {/* N: cobro del alta en la terminal Mercado Pago */}
+      {wizardCheckout && (
+        <div className="relative z-[80]">
+          <CheckoutModal
+            key={wizardCheckout.saleId}
+            saleId={wizardCheckout.saleId}
+            onClose={() => {
+              setWizardCheckout(null);
+              toast.warning("Alta sin pagar", {
+                description:
+                  "El miembro quedó registrado sin acceso. Usa \"Reintentar cobro\" para retomar el mismo cobro, o anúlalo en Cobros pendientes del POS.",
+                duration: 12_000,
+              });
+            }}
+            onSuccess={() => {
+              const c = wizardCheckout;
+              setWizardCheckout(null);
+              if (c.receipt) setSubscriptionTicketReceipt(c.receipt);
+              void finishWizardPayment(c.row, buildClientFieldsFromForm(), c.saleId, c.posTotal);
+            }}
+          />
+        </div>
+      )}
       
-            {/* N: cobro de la renovación en la terminal Mercado Pago */}
+      {/* N: cobro de la renovación en la terminal Mercado Pago */}
       {renewalCheckout && (
         <CheckoutModal
           key={renewalCheckout.saleId}

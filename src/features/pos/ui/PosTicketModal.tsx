@@ -8,11 +8,39 @@ type PosTicketModalProps = {
   onClose: () => void;
 };
 
+// N: marcas que devuelve Mercado Pago en payment_method.id
+const CARD_BRAND: Record<string, string> = {
+  visa: "Visa",
+  master: "Mastercard",
+  amex: "American Express",
+  debvisa: "Visa",
+  debmaster: "Mastercard",
+  carnet: "Carnet",
+};
+
+// N: tipo de tarjeta (payment_method.type)
+const CARD_TYPE: Record<string, string> = {
+  credit_card: "Crédito",
+  debit_card: "Débito",
+  prepaid_card: "Prepago",
+};
+
 export function PosTicketModal({
   receipt,
   labels,
   onClose,
 }: PosTicketModalProps) {
+  // N: datos de tarjeta / meses (solo si vienen de la terminal)
+  const installments = receipt.installments ?? 1;
+  const hasMsi = installments > 1;
+  const brand = receipt.cardBrand
+    ? CARD_BRAND[receipt.cardBrand] ?? receipt.cardBrand.toUpperCase()
+    : null;
+  const cardType = receipt.cardType
+    ? CARD_TYPE[receipt.cardType] ?? receipt.cardType
+    : null;
+  const monthly = hasMsi ? receipt.total / installments : 0;
+
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4 overflow-auto">
       <div className="bg-[#f5f5f0] text-[#1a1a1a] max-w-md w-full shadow-2xl border-4 border-[#e31e24]">
@@ -100,6 +128,25 @@ export function PosTicketModal({
                 receipt.paymentMethod}
             </span>
           </p>
+          {/* N: tarjeta y meses sin intereses */}
+          {(brand || cardType) && (
+            <p className="text-[11px] uppercase tracking-wide -mt-2">
+              Tarjeta:{" "}
+              <span className="font-bold">
+                {[brand, cardType].filter(Boolean).join(" · ")}
+              </span>
+            </p>
+          )}
+          {hasMsi && (
+            <div className="border border-[#e31e24] bg-[#e31e24]/5 px-3 py-2 text-[12px]">
+              <p className="font-black uppercase text-[#e31e24]">
+                {installments} meses sin intereses
+              </p>
+              <p className="text-[11px] text-[#555]">
+                {installments} pagos de ${monthly.toFixed(2)} {labels.currencySuffix}
+              </p>
+            </div>
+          )}
           <p className="text-[10px] text-[#888] text-center pt-2 leading-relaxed">
             {labels.ticketFooter}
           </p>

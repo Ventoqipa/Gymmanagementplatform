@@ -7,6 +7,11 @@ export { PosTicketModal } from "./ui/PosTicketModal";
 export { CheckoutModal } from "./ui/CheckoutModal"; // N
 export { usePosTerminal } from "./hooks/usePosTerminal";
 
+export { DirectDebitModal } from "./ui/DirectDebitModal";
+export * from "./api/subscriptionService";
+
+export { DirectDebitManageModal } from "./ui/DirectDebitManageModal";
+
 export { createPosConfig, eliteGymPosConfig } from "./config/createPosConfig";
 export type {
   PosConfig,
@@ -61,7 +66,16 @@ export {
   subscriptionConceptLabel,
   ticketIdFromSaleId,
 } from "./domain/subscriptionReceipt";
-export { summarizePosSales } from "./domain/summarizeSales";
+export {
+  summarizePosSales,
+  summarizePosSalesBreakdown,
+  isPaidSale,
+  isUnpaidSale,
+  isRefundedSale,
+  salePaymentStatus,
+  salePaymentMethodGroup,
+} from "./domain/summarizeSales";
+export type { PosSalesBreakdown } from "./domain/summarizeSales";
 export {
   filterSalesByPayer,
   payerKeyFromSale,
