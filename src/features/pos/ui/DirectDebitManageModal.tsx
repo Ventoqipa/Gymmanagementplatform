@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
-import { CardPayment } from "@mercadopago/sdk-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, CreditCard, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import { ensureMercadoPago } from "./DirectDebitModal";
+import { CARD_CUSTOMIZATION, StableCardPayment, ensureMercadoPago } from "./DirectDebitModal";
 import {
   cancelDirectDebit,
   getDirectDebitCharges,
@@ -183,6 +182,19 @@ export function DirectDebitManageModal({
     }
   };
 
+  // N: datos y funciones estables para que el formulario no se reinicie
+  const cardInit = useMemo(
+    () => ({ amount: sub?.amount ?? 0, payer: { email: defaultEmail ?? "" } }),
+    [sub?.amount, defaultEmail],
+  );
+  const cardSubmitRef = useRef(handleCardSubmit);
+  cardSubmitRef.current = handleCardSubmit;
+  const onCardSubmit = useCallback(
+    (data: { token: string }) => cardSubmitRef.current(data),
+    [],
+  );
+  const onCardError = useCallback((e: unknown) => console.error("[CardPayment]", e), []);
+
   const handleCancelDebit = async () => {
     if (!sub) return;
     if (!window.confirm(`¿Cancelar el pago domiciliado de ${memberName}? Ya no se harán más cargos.`)) {
@@ -346,14 +358,11 @@ export function DirectDebitManageModal({
               El socio captura su tarjeta nueva. No se hace ningún cargo ahora: el siguiente cargo
               mensual (${money(sub.amount)}) se hará con esta tarjeta.
             </p>
-            <CardPayment
-              initialization={{ amount: sub.amount, payer: { email: defaultEmail ?? "" } }}
-              customization={{
-                paymentMethods: { maxInstallments: 1 },
-                visual: { style: { theme: "dark" } },
-              }}
-              onSubmit={handleCardSubmit}
-              onError={(e) => console.error("[CardPayment]", e)}
+              <StableCardPayment
+              initialization={cardInit}
+              customization={CARD_CUSTOMIZATION}
+              onSubmit={onCardSubmit}
+              onError={onCardError}
             />
             {working ? (
               <p className="mt-3 flex items-center gap-2 text-[#808080] text-[11px]">
