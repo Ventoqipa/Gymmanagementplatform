@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Loader2 } from "lucide-react";
+import { Download, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import type { PosSale } from "@/features/pos";
 import {
@@ -12,6 +12,7 @@ import {
   summarizeSalesByPayer,
 } from "@/features/pos";
 import { getGymPosService } from "../config/gymPosService";
+import { RefundSaleModal } from "../components/RefundSaleModal"; // N: reembolsos
 import {
   exportCashierReport,
   exportPeriodSummaryReport,
@@ -93,6 +94,11 @@ function SaleStatusBadge({ sale }: { sale: PosSale }) {
   );
 }
 
+// N: solo ventas pagadas con tarjeta/terminal se pueden reembolsar
+function canRefundSale(sale: PosSale): boolean {
+  return salePaymentStatus(sale) === "APPROVED" && sale.method === "CARD";
+}
+
 export default function Reports() {
   const [tab, setTab] = useState<TabId>("products");
   const [dateFrom, setDateFrom] = useState(() => startOfMonthIso());
@@ -100,6 +106,7 @@ export default function Reports() {
   const [loading, setLoading] = useState(true);
   const [allSales, setAllSales] = useState<PosSale[]>([]);
   const [payerFilter, setPayerFilter] = useState("ALL");
+  const [refundSale, setRefundSale] = useState<PosSale | null>(null); // N
 
   const range = useMemo(() => {
     const from = dateFrom <= dateTo ? dateFrom : dateTo;
@@ -582,6 +589,19 @@ export default function Reports() {
                             timeStyle: "short",
                           })}
                         </p>
+
+                        {/* N: botón de reembolso */}
+                        {canRefundSale(s) && (
+                          <button
+                            type="button"
+                            onClick={() => setRefundSale(s)}
+                            className="mt-2 inline-flex items-center gap-1.5 border border-[#5c8dff]/40 text-[#b8d4ff] hover:bg-[#5c8dff]/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide transition-colors"
+                          >
+                            <RotateCcw size={11} />
+                            Reembolsar
+                          </button>
+                        )}
+
                       </div>
                     );
                   })
@@ -662,6 +682,19 @@ export default function Reports() {
           </div>
         </>
       )}
+
+      {/* N: modal de reembolso */}
+      {refundSale && (
+        <RefundSaleModal
+          sale={refundSale}
+          onClose={() => setRefundSale(null)}
+          onRefunded={() => {
+            setRefundSale(null);
+            void loadReports();
+          }}
+        />
+      )}
+
     </div>
   );
 }
