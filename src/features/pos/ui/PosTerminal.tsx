@@ -538,15 +538,16 @@ export function PosTerminal() {
         <CheckoutModal
           key={activeSaleId}
           saleId={activeSaleId}
-          onClose={closeCheckout}
-          onSuccess={() => {
-            // Solo se vacía el carrito si se pagó la venta del carrito actual,
-            // no una venta pendiente retomada desde el panel
-            const paidCurrentCart = activeSaleId === cartSaleId;
+          onClose={() => {
+            // N: si era la venta del carrito, queda en "Cobros pendientes" y se limpia el carrito
+            pos.abandonTerminalSale(activeSaleId);
             closeCheckout();
-            if (paidCurrentCart) {
-              pos.clearCart();
-            }
+          }}
+          onSuccess={(info) => {
+            // CAMBIO: muestra el ticket con meses/tarjeta y limpia el carrito si era la venta actual
+            const saleId = activeSaleId;
+            closeCheckout();
+            void pos.completeTerminalSale(saleId, info);
           }}
 
         />

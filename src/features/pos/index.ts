@@ -10,6 +10,8 @@ export { usePosTerminal } from "./hooks/usePosTerminal";
 export { DirectDebitModal } from "./ui/DirectDebitModal";
 export * from "./api/subscriptionService";
 
+export { DirectDebitManageModal } from "./ui/DirectDebitManageModal";
+
 export { createPosConfig, eliteGymPosConfig } from "./config/createPosConfig";
 export type {
   PosConfig,

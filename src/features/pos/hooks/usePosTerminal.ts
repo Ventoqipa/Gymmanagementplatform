@@ -399,15 +399,24 @@ export function usePosTerminal() {
     }
   };
 
-  // NUEVO: el pago en terminal se aprobó (venta del carrito o retomada desde pendientes)
-  const completeTerminalSale = async (saleId: string, installments?: number | null) => {
+  // CAMBIO: el pago en terminal se aprobó; el ticket lleva meses y tarjeta
+  const completeTerminalSale = async (
+    saleId: string,
+    info?: { installments?: number; cardBrand?: string | null; cardType?: string | null },
+  ) => {
     const pending = terminalSaleRef.current;
-    const plan = installments && installments > 1 ? ` · ${installments} MSI` : "";
+    const installments = info?.installments ?? 1;
+    const plan = installments > 1 ? ` · ${installments} MSI` : "";
 
     if (pending?.saleId === saleId) {
       terminalSaleRef.current = null;
       setCurrentSaleId(null);
-      setTicketReceipt(pending.result.receipt);
+      setTicketReceipt({
+        ...pending.result.receipt,
+        installments,
+        cardBrand: info?.cardBrand ?? undefined,
+        cardType: info?.cardType ?? undefined,
+      });
       config.onSaleComplete?.(pending.result.sale);
       clearCart();
     }
