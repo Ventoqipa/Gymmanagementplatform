@@ -31,7 +31,6 @@ export const CARD_CUSTOMIZATION = {
 };
 
 type CardFormData = { token: string; payer?: { email?: string } };
-
 type Props = {
   memberId: string;
   memberName: string;
@@ -72,6 +71,7 @@ export function DirectDebitModal({
   );
 
   const handleSubmit = async (formData: CardFormData) => {
+
     setError(null);
     setSending(true);
     try {
@@ -102,12 +102,13 @@ export function DirectDebitModal({
     }
   };
 
+
   // N: el formulario siempre recibe la misma función; por dentro usa la versión más reciente
   const submitRef = useRef(handleSubmit);
   submitRef.current = handleSubmit;
   const onCardSubmit = useCallback((data: CardFormData) => submitRef.current(data), []);
   const onCardError = useCallback((e: unknown) => console.error("[CardPayment]", e), []);
-
+ main
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4">
       <div className="relative w-full max-w-md max-h-[92vh] overflow-y-auto border border-[rgba(93,63,60,0.3)] bg-[#131313] p-5 sm:p-6 shadow-2xl">
