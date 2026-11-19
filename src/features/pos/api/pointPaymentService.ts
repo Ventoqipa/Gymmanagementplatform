@@ -53,6 +53,8 @@ type PaymentStatusResponse = ApiResponse & {
     mp_status?: string | null;          // created, at_terminal, action_required, processed...
     mp_status_detail?: string | null;   // motivo del rechazo, p. ej. insufficient_amount
     installments?: number | null;       // MSI
+    cardBrand?: string | null; // N: visa, master...
+    cardType?: string | null;  // N: credit_card / debit_card
     payment_method?: string;
     message?: string;
   };

@@ -44,6 +44,9 @@ export type PosTicketReceipt = {
   ivaRegimen: IvaRegimen;
   ivaRate: number;
   ivaLabelShort: string;
+  installments?: number; // N: meses elegidos en la terminal
+  cardBrand?: string;    // N: visa, master, amex...
+  cardType?: string;     // N: credit_card / debit_card
 };
 
 export type PosSaleLine = {
