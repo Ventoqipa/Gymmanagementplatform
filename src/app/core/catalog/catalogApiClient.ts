@@ -35,11 +35,17 @@ export type CatalogRequestOptions = {
  * IIS/Neubox (StaticFile/WebDAV) suele responder 405 a PUT/DELETE.
  * En esas rutas usamos POST + X-HTTP-Method-Override; el proxy PHP
  * reenvía el verbo real al API Tanosi.
+ * En local (proxy de Vite) no hay proxy PHP: se manda el verbo real.
  */
+const useMethodOverride =
+  (import.meta.env.VITE_CATALOG_METHOD_OVERRIDE ?? (import.meta.env.DEV ? "false" : "true"))
+    .trim()
+    .toLowerCase() === "true";
+
 function resolveCatalogFetch(
   method: CatalogRequestOptions["method"],
-): { fetchMethod: "GET" | "POST"; override?: "PUT" | "DELETE" } {
-  if (method === "PUT" || method === "DELETE") {
+): { fetchMethod: "GET" | "POST" | "PUT" | "DELETE"; override?: "PUT" | "DELETE" } {
+  if (useMethodOverride && (method === "PUT" || method === "DELETE")) {
     return { fetchMethod: "POST", override: method };
   }
   return { fetchMethod: method };
