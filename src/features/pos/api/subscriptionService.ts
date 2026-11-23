@@ -103,3 +103,4 @@ export type DirectDebitCharges = {
 export function getDirectDebitCharges(id: string) {
   return posGet<DirectDebitCharges>(config(), POS_API_PATHS.subscriptionCharges(id));
 }
+
