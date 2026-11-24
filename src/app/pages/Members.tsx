@@ -540,7 +540,8 @@ function applyDirectDebitPeriod(
   const months = option.months ?? (option.key === "12m" ? 12 : 6);
   const monthlyPrice = option.priceDirectDebit;
   return {
-    renewalDate: renewalAfterPeriod(enrollmentIso, { months }),
+    // Domiciliado: se activa un mes; los siguientes llegan con cada cobro
+    renewalDate: renewalAfterPeriod(enrollmentIso, { months: 1 }),
     monthlyPrice,
     months,
     projectedTotal: monthlyPrice * months,
@@ -628,7 +629,8 @@ function extendMembershipPeriod(
   directDebit = false,
 ): { newRenewalDate: string; cost: string } {
   return {
-    newRenewalDate: addPeriodToDate(fromIso, option.period),
+    // Domiciliado: se activa un mes; los siguientes llegan con cada cobro
+    newRenewalDate: addPeriodToDate(fromIso, directDebit ? { months: 1 } : option.period),
     // En domiciliado el costo mostrado es la mensualidad.
     cost: (directDebit ? option.priceDirectDebit : option.priceRegular).toFixed(
       2,
@@ -704,6 +706,8 @@ type RenewalPlan = {
   /** Venta del POS; null en domiciliado o si se guardó solo en local */
   saleId: string | null;
   amount: number;
+  /** Precio regular del plan (el catálogo lo pide también en domiciliado) */
+  priceRegular: number;
   isDirectDebit: boolean;
   newRenewalDate: string;
   priceBranchFrequencyID: number;
@@ -1271,8 +1275,7 @@ export default function Members() {
         renewalDate: memberEditForm.renewalDate,
         idDocumentDataUrl: memberEditForm.idDocumentDataUrl,
         isDirectDebit: member.isDirectDebit === true,
-        priceRegular:
-          member.isDirectDebit === true ? 0 : (member.regularPrice ?? 0),
+        priceRegular: member.regularPrice ?? 0,
         priceDirectDebit:
           member.isDirectDebit === true ? (member.directDebitPrice ?? 0) : 0,
       });
@@ -1397,22 +1400,26 @@ export default function Members() {
           renewalDate: newRenewalDate,
           idDocumentDataUrl: member.idDocumentDataUrl,
           isDirectDebit,
-          priceRegular: isDirectDebit ? 0 : amount,
+          priceRegular: plan.priceRegular,
           priceDirectDebit: isDirectDebit ? amount : 0,
           priceBranchFrequencyID: plan.priceBranchFrequencyID,
         });
         if (!updateResult.ok) {
+          if (isDirectDebit) {
+            // La tarjeta ya quedó autorizada: no se debe repetir el domiciliado
+            setPaymentModalMember(null);
+            toast.warning("Domiciliado activo; faltó actualizar al socio", {
+              description: `${updateResult.message} Mercado Pago ya cobrará cada mes; la vigencia se actualizará con el primer cobro. No lo vuelvas a domiciliar.`,
+              duration: 15_000,
+            });
+            return false;
+          }
           // El cobro ya se hizo: el reintento solo repite la actualización
-          if (!isDirectDebit) setApprovedRenewal(plan);
-          toast.warning(
-            isDirectDebit
-              ? "No se pudo actualizar la domiciliación"
-              : "Cobro registrado; falta actualizar la vigencia",
-            {
-              description: `${updateResult.message} Reintenta: solo se repetirá la actualización${isDirectDebit ? "" : ", no el cobro"}.`,
-              duration: 12_000,
-            },
-          );
+          setApprovedRenewal(plan);
+          toast.warning("Cobro registrado; falta actualizar la vigencia", {
+            description: `${updateResult.message} Reintenta: solo se repetirá la actualización, no el cobro.`,
+            duration: 12_000,
+          });
           return false;
         }
         setMembers((prev) => {
@@ -1534,6 +1541,7 @@ export default function Members() {
       member,
       saleId: null,
       amount,
+      priceRegular: amount,
       isDirectDebit,
       newRenewalDate: paymentForm.newRenewalDate,
       priceBranchFrequencyID: paymentForm.priceBranchFrequencyID,
@@ -1826,6 +1834,10 @@ export default function Members() {
     const membershipAmount = parseFloat(newMemberForm.membershipCost);
     const subscriptionFeeAmount = parseFloat(newMemberForm.subscriptionFee);
     const addressTrim = newMemberForm.address.trim();
+    // Domiciliado: el catálogo también pide el precio regular del plan
+    const regularPrice = newMemberForm.directDebit
+      ? (findPeriodOption(directDebitOptions, newMemberForm.selectedPeriodKey)?.priceRegular ?? 0)
+      : membershipAmount;
     return {
       firstName,
       lastName,
@@ -1840,6 +1852,7 @@ export default function Members() {
       membershipAmount,
       subscriptionFeeAmount,
       addressTrim,
+      regularPrice,
     };
   };
 
@@ -1892,7 +1905,7 @@ export default function Members() {
           : newMemberForm.renewalDate,
         idDocumentDataUrl: newMemberForm.idDocumentDataUrl,
         isDirectDebit: newMemberForm.directDebit,
-        priceRegular: newMemberForm.directDebit ? 0 : f.membershipAmount,
+        priceRegular: f.regularPrice,
         priceDirectDebit: newMemberForm.directDebit ? f.membershipAmount : 0,
         priceBranchFrequencyID: newMemberForm.priceBranchFrequencyID,
         isPromotionalSubscription: !newMemberForm.chargeSubscriptionFee,
@@ -1997,7 +2010,7 @@ export default function Members() {
           renewalDate: targetRenewal,
           idDocumentDataUrl: newMemberForm.idDocumentDataUrl,
           isDirectDebit: newMemberForm.directDebit,
-          priceRegular: newMemberForm.directDebit ? 0 : f.membershipAmount,
+          priceRegular: f.regularPrice,
           priceDirectDebit: newMemberForm.directDebit ? f.membershipAmount : 0,
           priceBranchFrequencyID: newMemberForm.priceBranchFrequencyID,
         });
