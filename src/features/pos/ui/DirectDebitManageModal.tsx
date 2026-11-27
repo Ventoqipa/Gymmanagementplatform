@@ -197,7 +197,11 @@ export function DirectDebitManageModal({
 
   const handleCancelDebit = async () => {
     if (!sub) return;
-    if (!window.confirm(`¿Cancelar el pago domiciliado de ${memberName}? Ya no se harán más cargos.`)) {
+    if (
+      !window.confirm(
+        `¿Cancelar el pago domiciliado de ${memberName}?\n\nYa no se harán más cargos. Conserva la vigencia que ya pagó y después renovará con pago directo.\n\nEsto no se puede deshacer.`,
+      )
+    ) {
       return;
     }
     setError(null);
@@ -205,8 +209,7 @@ export function DirectDebitManageModal({
     try {
       const updated = await cancelDirectDebit(sub.id);
       setSub(updated);
-      setDoneMessage("Domiciliado cancelado. Ya no se harán más cargos a la tarjeta.");
-      setPhase("done");
+      setDoneMessage("Domiciliado cancelado. Ya no se harán más cargos; el socio conserva la vigencia que ya pagó.");
       onChanged?.(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo cancelar. Intenta de nuevo.");

@@ -386,7 +386,8 @@ function urgencyPillClass(level: ExpiryUrgency): string {
 }
 
 function formatRenewalDate(renewalDateIso: string): string {
-  return new Date(renewalDateIso).toLocaleDateString("en-US", {
+  // Mediodía local: "2027-01-19" sin hora se leía como UTC y mostraba el día anterior
+  return new Date(`${renewalDateIso.slice(0, 10)}T12:00:00`).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -468,10 +469,27 @@ function MemberExpiryIndicator({
 
 const ITEMS_PER_PAGE = 8;
 
+/** Fecha local YYYY-MM-DD (toISOString usa UTC: en la tarde da el día siguiente). */
+function localIso(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Suma meses sin brincarse de mes (31 ene + 1 = 28/29 feb), igual que el backend. */
+function addMonthsLocal(d: Date, months: number): void {
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + months);
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
+}
+
 function addMonthsIso(dateStr: string, months: number): string {
   const d = new Date(dateStr + "T12:00:00");
-  d.setMonth(d.getMonth() + months);
-  return d.toISOString().slice(0, 10);
+  addMonthsLocal(d, months);
+  return localIso(d);
 }
 
 /** Fin del periodo permitido: alta + 18 meses. */
@@ -495,8 +513,8 @@ function renewalAfterPeriod(
   const d = new Date(enrollmentIso + "T12:00:00");
   if (period.days) d.setDate(d.getDate() + period.days);
   else if (period.weeks) d.setDate(d.getDate() + period.weeks * 7);
-  else if (period.months) d.setMonth(d.getMonth() + period.months);
-  return clampRenewalDate(enrollmentIso, d.toISOString().slice(0, 10));
+  else if (period.months) addMonthsLocal(d, period.months);
+  return clampRenewalDate(enrollmentIso, localIso(d));
 }
 
 function renewalAfterMonths(enrollmentIso: string, months: number): string {
@@ -606,21 +624,21 @@ function addPeriodToDate(
   const d = new Date(`${fromIso}T12:00:00`);
   if (period.days) d.setDate(d.getDate() + period.days);
   else if (period.weeks) d.setDate(d.getDate() + period.weeks * 7);
-  else if (period.months) d.setMonth(d.getMonth() + period.months);
-  return d.toISOString().slice(0, 10);
+  else if (period.months) addMonthsLocal(d, period.months);
+  return localIso(d);
 }
 
-/** Día anterior: el alta con tarjeta nace vencida hasta que se aprueba el pago. */
 function dayBeforeIso(iso: string): string {
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
+  return localIso(d);
 }
 
 /** Fecha desde la que se extiende la vigencia al renovar. */
 function renewalBaseDate(member: Pick<Member, "renewalDate">): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return member.renewalDate >= today ? member.renewalDate : today;
+  const today = localIso(new Date());
+  const current = member.renewalDate.slice(0, 10);
+  return current >= today ? current : today;
 }
 
 function extendMembershipPeriod(
@@ -664,7 +682,7 @@ function memberToEditForm(member: Member) {
 }
 
 const emptyNewMemberForm = () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localIso(new Date());
   const defaultOpt =
     FALLBACK_DIRECT_PAY_OPTIONS.find((p) => p.key === "1m") ??
     FALLBACK_DIRECT_PAY_OPTIONS[0];
@@ -1530,6 +1548,16 @@ export default function Members() {
 
     const member = paymentModalMember;
     const isDirectDebit = paymentForm.directDebit;
+    // N: con domiciliado activo no se cobra aparte (pagaría dos veces el mismo mes)
+    if (member.isDirectDebit === true) {
+      toast.error("Este socio ya paga con domiciliado", {
+        description: isDirectDebit
+          ? "Ya tiene un domiciliado activo. Para usar otra tarjeta: botón Domiciliado → Cambiar tarjeta."
+          : "Cancela su domiciliado antes de renovar con pago directo; si no, pagaría dos veces el mismo mes.",
+        duration: 12_000,
+      });
+      return;
+    }
     const debitOpt = isDirectDebit
       ? (findPeriodOption(directDebitOptions, paymentForm.periodKey) ??
         directDebitOptions[0])
@@ -1923,6 +1951,17 @@ export default function Members() {
         return null;
       }
 
+      // N: sin clientID no se puede cobrar ni ligar la venta al socio
+      if (!clientIdFromMemberId(apiResult.member.id)) {
+        toast.error("El catálogo no regresó el ID del socio", {
+          description:
+            "El socio pudo haberse creado. Pulsa Actualizar en Miembros y búscalo antes de volver a darlo de alta. No se realizó ningún cobro.",
+          duration: 15_000,
+        });
+        void refreshMembersFromApi();
+        return null;
+      }
+
       const row: Member = {
         ...apiResult.member,
         phone: f.phoneDisplay,
@@ -2102,7 +2141,7 @@ export default function Members() {
     const { posTotal, method } = wizardCharge(f);
 
     if (posTotal <= 0) {
-      await finishWizardPayment(row, f, null, 0);
+      await afterWizardFeePaid(row, f, null, 0);
       return;
     }
 
@@ -2137,7 +2176,7 @@ export default function Members() {
             return;
           }
           // 24: ya pagado, solo falta activar
-          await finishWizardPayment(row, f, info.saleId, amount);
+          await afterWizardFeePaid(row, f, info.saleId, amount);
           return;
         }
       }
@@ -2161,7 +2200,7 @@ export default function Members() {
 
     // Efectivo / QR: ya pagado
     setSubscriptionTicketReceipt(result.receipt);
-    await finishWizardPayment(row, f, serverSale?.id ?? null, posTotal);
+    await afterWizardFeePaid(row, f, serverSale?.id ?? null, posTotal);
   };
 
   /**
@@ -3114,6 +3153,12 @@ export default function Members() {
                     {formatRenewalDate(paymentModalMember.renewalDate)}
                   </span>
                 </p>
+                {paymentModalMember.isDirectDebit ? (
+                  <p className="mt-2 border border-[#ffa726]/45 bg-[#ffa726]/10 px-2.5 py-2 text-[11px] text-[#ffcc80] leading-relaxed">
+                    Este socio ya paga con domiciliado: Mercado Pago le cobra cada mes. Para cambiar la
+                    tarjeta o cancelarlo, usa el botón <span className="font-bold">Domiciliado</span>.
+                  </p>
+                ) : null}
               </div>
               <button
                 type="button"
@@ -3261,11 +3306,35 @@ export default function Members() {
               </div>
               <div className="bg-[#0e0e0e] border border-[rgba(93,63,60,0.15)] px-4 py-3">
                 <p className="text-[#808080] text-[10px] uppercase tracking-wide mb-1">
-                  Nueva vigencia hasta
+                  {paymentForm.directDebit
+                    ? "Vigencia al autorizar (primer mes)"
+                    : "Nueva vigencia hasta"}
                 </p>
                 <p className="text-[#e5e2e1] text-[15px] font-black">
                   {formatRenewalDate(paymentForm.newRenewalDate)}
                 </p>
+                {paymentForm.directDebit
+                  ? (() => {
+                      // Domiciliado: cada cobro suma un mes hasta completar el plan
+                      const opt =
+                        findPeriodOption(directDebitOptions, paymentForm.periodKey) ??
+                        directDebitOptions[0];
+                      if (!opt) return null;
+                      const planEnd = addPeriodToDate(
+                        renewalBaseDate(paymentModalMember),
+                        opt.period,
+                      );
+                      return (
+                        <p className="text-[#808080] text-[10px] mt-1.5 leading-relaxed">
+                          Plan de {opt.label}: se suma un mes con cada cobro, hasta{" "}
+                          <span className="text-[#e5e2e1] font-bold">
+                            {formatRenewalDate(planEnd)}
+                          </span>
+                          .
+                        </p>
+                      );
+                    })()
+                  : null}
               </div>
               <div>
                 <label className="block text-[#808080] text-[10px] font-bold tracking-[1.2px] uppercase mb-2">
@@ -4796,6 +4865,7 @@ export default function Members() {
           memberName={manageDebitFor.memberName}
           defaultEmail={manageDebitFor.email}
           onClose={() => setManageDebitFor(null)}
+          onChanged={() => void refreshMembersFromApi()}
         />
       )}
 
@@ -4817,7 +4887,7 @@ export default function Members() {
               const c = wizardCheckout;
               setWizardCheckout(null);
               if (c.receipt) setSubscriptionTicketReceipt(c.receipt);
-              void finishWizardPayment(c.row, buildClientFieldsFromForm(), c.saleId, c.posTotal);
+              void afterWizardFeePaid(c.row, buildClientFieldsFromForm(), c.saleId, c.posTotal);
             }}
           />
         </div>

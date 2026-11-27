@@ -4,10 +4,16 @@ import { buildClientDocumentUrl } from "../utils/clientDocUrl";
 import { decodeEmergencyPhone } from "../utils/emergencyPhone";
 
 function isoDatePart(value?: string | null): string {
-  if (!value) return new Date().toISOString().slice(0, 10);
+  if (!value) {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  // El catálogo manda "2026-12-19T18:00:00" sin zona: se toma el día tal cual.
+  // Convertirlo con toISOString lo pasaba al día siguiente (UTC).
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value.slice(0, 10);
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function readEnrollment(client: CatalogClient): string {
@@ -144,10 +150,9 @@ export function clientToMember(
     faceIdEnrolled: faceId ? true : undefined,
     faceIdTemplateId: faceId || undefined,
     isDirectDebit: client.isDirectDebit === true ? true : undefined,
+    // Se conserva siempre: el catálogo lo pide aunque el socio sea domiciliado
     regularPrice:
-      client.isDirectDebit !== true && client.priceRegular != null
-        ? Number(client.priceRegular)
-        : undefined,
+      client.priceRegular != null ? Number(client.priceRegular) : undefined,
     directDebitPrice:
       client.isDirectDebit === true && client.priceDirectDebit != null
         ? Number(client.priceDirectDebit)
