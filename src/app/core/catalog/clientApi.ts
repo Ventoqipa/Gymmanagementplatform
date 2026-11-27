@@ -14,6 +14,12 @@ import type {
   CatalogClientWritePayload,
   UpdateClientInput,
 } from "./types";
+import {
+  findClientIdByMemberNumber,
+  findNewestClientIdByContact,
+  memberNumberFromAddData,
+  rawClientRows,
+} from "./utils/resolveAddedClientId";
 
 function toIsoDateTime(dateIso: string): string {
   return new Date(`${dateIso}T12:00:00`).toISOString();
@@ -211,7 +217,33 @@ export async function postClientAdd(
     body: payload,
   });
   if (data && typeof data === "object" && "clientID" in data) {
-    return data as CatalogClient;
+    const id = Number((data as CatalogClient).clientID);
+    if (id > 0) return data as CatalogClient;
+  }
+
+  // El catálogo responde "Membresía #: MTS-...": buscamos el ClientID en ViewAll.
+  const memberNumber = memberNumberFromAddData(data);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 800));
+    try {
+      const list = await catalogRequest<unknown>({
+        method: "GET",
+        url: catalogUrl(catalogConfig.paths.viewAll(payload.companyID, payload.branchID)),
+      });
+      const rows = rawClientRows(list);
+      const clientId =
+        (memberNumber ? findClientIdByMemberNumber(rows, memberNumber) : null) ??
+        findNewestClientIdByContact(rows, payload.email ?? "", payload.phoneNumber ?? "");
+      if (clientId) {
+        return {
+          ...payload,
+          clientID: clientId,
+          ...(memberNumber ? { memberID: memberNumber } : {}),
+        } as CatalogClient;
+      }
+    } catch {
+      // si falla la lista, se reintenta una vez; si no, sigue con clientID 0
+    }
   }
   return payload;
 }

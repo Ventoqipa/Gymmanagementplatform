@@ -108,7 +108,6 @@ export function DirectDebitModal({
   submitRef.current = handleSubmit;
   const onCardSubmit = useCallback((data: CardFormData) => submitRef.current(data), []);
   const onCardError = useCallback((e: unknown) => console.error("[CardPayment]", e), []);
- main
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4">
       <div className="relative w-full max-w-md max-h-[92vh] overflow-y-auto border border-[rgba(93,63,60,0.3)] bg-[#131313] p-5 sm:p-6 shadow-2xl">
